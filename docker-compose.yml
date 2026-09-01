@@ -1,0 +1,66 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: myapp-database
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    networks:
+      - app-network
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-app_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-app_db}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: myapp-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - .:/opt/app
+      - /opt/app/.venv
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  alembic:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: myapp-alembic
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - .:/opt/app
+      - /opt/app/.venv
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Runs alembic migrations automatically
+    entrypoint: ["alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini", "upgrade", "head"]
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge

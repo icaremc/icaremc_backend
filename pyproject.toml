@@ -1,0 +1,15 @@
+[project]
+name = "icaremc"
+version = "0.1.0"
+description = "FastAPI application"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy",
+    "alembic",
+    "pydantic-settings",
+    "asyncpg",
+    "python-dotenv",
+]
