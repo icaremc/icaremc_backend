@@ -9,4 +9,5 @@ wheels/
 # Virtual environments
 .venv
 .env
+.cursor/
 project_structure_guide.md
