@@ -9,7 +9,8 @@ cp .env.example .env
 docker compose up -d db
 uv sync
 alembic -c app/persistence/sqlalchemy/alembic.ini upgrade head
-uvicorn main:app --reload
+uvicorn app.main:app --reload
+# or: python main.py
 ```
 
 Health: `GET /api/v1/health`
