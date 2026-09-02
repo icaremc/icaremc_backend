@@ -9,13 +9,26 @@ cp .env.example .env
 docker compose up -d db
 uv sync
 alembic -c app/persistence/sqlalchemy/alembic.ini upgrade head
-uvicorn app.main:app --reload
+fastapi dev
+# or: uvicorn app.main:app --reload
 # or: python main.py
 ```
+
+Skills (agent): `.agents/skills/{fastapi,fastapi-python,drizzle-patterns}` — FastAPI/Annotated deps; drizzle patterns mapped to SQLAlchemy only (no Drizzle).
 
 Health: `GET /api/v1/health`
 
 Bootstrap first admin: `POST /api/v1/admin/bootstrap-super-admin`
+
+## Tests
+
+Needs Postgres DB `app_db_test` (same credentials as `.env`):
+
+```bash
+PGPASSWORD=password psql -h localhost -U app_user -d postgres -c "CREATE DATABASE app_db_test OWNER app_user;"
+uv sync --group dev
+pytest
+```
 
 ## Remotes
 

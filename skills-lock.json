@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "drizzle-patterns": {
+      "source": "diegosouzapw/awesome-omni-skill",
+      "sourceType": "github",
+      "skillPath": "skills/development/drizzle-patterns/SKILL.md",
+      "computedHash": "68783196750afc5f7b4b15b4b12285220351410d30f5a7abda7b9ce4467eeafb"
+    },
+    "fastapi": {
+      "source": "fastapi/fastapi",
+      "sourceType": "github",
+      "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
+      "computedHash": "e85d9e223fbc3183b1a599bbe8b02d2edf275d046ff5bcfd14352c92cdff52b3"
+    },
+    "fastapi-python": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "fastapi-python/SKILL.md",
+      "computedHash": "1d7346210a6690d2faeb089f074c0dc20a7056c2c83ac1062a11c1b73158be72"
+    }
+  }
+}

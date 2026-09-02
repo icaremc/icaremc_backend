@@ -2,13 +2,24 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
+from app.api.v1.schemas import (
+    AppointmentOut,
+    CmsItemOut,
+    DoctorDetailOut,
+    OkOut,
+    ProfileOut,
+    RowOut,
+    WalletBundleOut,
+)
+from app.core.i18n import LangDep, cms_item, translation_or_en
 from app.core.security.deps import RequirePatient
-from app.persistence.sqlalchemy.deps import get_db
+from app.persistence.sqlalchemy.deps import DbDep
+from app.persistence.sqlalchemy.serialize import row_dict
 from app.persistence.sqlalchemy.models import (
     Appointment,
     AppointmentReview,
@@ -49,8 +60,13 @@ from app.persistence.sqlalchemy.models import (
 router = APIRouter(tags=["mother"])
 
 
-def _row(obj) -> dict:
-    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+def _out(obj) -> RowOut:
+    data = row_dict(obj) if hasattr(obj, "__table__") else obj
+    return RowOut.model_validate(data)
+
+
+def _outs(rows) -> list[RowOut]:
+    return [_out(r) for r in rows]
 
 
 class ProfileUpdate(BaseModel):
@@ -144,8 +160,6 @@ class BookIn(BaseModel):
     note: str | None = None
     care_subscription_id: UUID | None = None
     payment_method: str | None = None
-    chapa_tx_ref: str | None = None
-    amount_paid: Decimal = Decimal("0")
 
 
 class ReviewIn(BaseModel):
@@ -164,38 +178,38 @@ class WithdrawIn(BaseModel):
 
 
 @router.get("/me/profile")
-async def get_profile(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def get_profile(user: RequirePatient, db: DbDep) -> ProfileOut:
     profile = (await db.execute(select(Profile).where(Profile.id == user.id))).scalar_one_or_none()
     if profile is None:
         raise HTTPException(404, "Profile not found")
-    return _row(profile)
+    return ProfileOut.model_validate(row_dict(profile))
 
 
 @router.patch("/me/profile")
-async def patch_profile(body: ProfileUpdate, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def patch_profile(body: ProfileUpdate, user: RequirePatient, db: DbDep) -> ProfileOut:
     profile = (await db.execute(select(Profile).where(Profile.id == user.id))).scalar_one()
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(profile, k, v)
     await db.flush()
-    return _row(profile)
+    return ProfileOut.model_validate(row_dict(profile))
 
 
 @router.get("/pregnancies")
-async def list_pregnancies(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def list_pregnancies(user: RequirePatient, db: DbDep):
     rows = (await db.execute(select(Pregnancy).where(Pregnancy.user_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/pregnancies")
-async def create_pregnancy(body: PregnancyIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def create_pregnancy(body: PregnancyIn, user: RequirePatient, db: DbDep):
     row = Pregnancy(user_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.post("/pregnancy-logs")
-async def create_pregnancy_log(body: PregnancyLogIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def create_pregnancy_log(body: PregnancyLogIn, user: RequirePatient, db: DbDep):
     preg = (
         await db.execute(select(Pregnancy).where(Pregnancy.id == body.pregnancy_id, Pregnancy.user_id == user.id))
     ).scalar_one_or_none()
@@ -204,11 +218,11 @@ async def create_pregnancy_log(body: PregnancyLogIn, user: RequirePatient, db: A
     row = PregnancyLog(**body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/pregnancy-logs")
-async def list_pregnancy_logs(user: RequirePatient, db: AsyncSession = Depends(get_db), pregnancy_id: UUID | None = None):
+async def list_pregnancy_logs(user: RequirePatient, db: DbDep, pregnancy_id: UUID | None = None):
     q = (
         select(PregnancyLog)
         .join(Pregnancy, Pregnancy.id == PregnancyLog.pregnancy_id)
@@ -216,86 +230,80 @@ async def list_pregnancy_logs(user: RequirePatient, db: AsyncSession = Depends(g
     )
     if pregnancy_id:
         q = q.where(PregnancyLog.pregnancy_id == pregnancy_id)
-    return [_row(r) for r in (await db.execute(q)).scalars().all()]
+    return [_out(r) for r in (await db.execute(q)).scalars().all()]
 
 
 @router.get("/cms/pregnancy-weeks")
-async def cms_pregnancy_weeks(db: AsyncSession = Depends(get_db), lang: str = "en"):
+async def cms_pregnancy_weeks(db: DbDep, lang: LangDep) -> list[CmsItemOut]:
     weeks = (await db.execute(select(PregnancyWeek).where(PregnancyWeek.is_published.is_(True)))).scalars().all()
-    out = []
+    out: list[CmsItemOut] = []
     for w in weeks:
-        item = _row(w)
-        tr = (
-            await db.execute(
-                select(PregnancyWeekTranslation).where(
-                    PregnancyWeekTranslation.pregnancy_week_id == w.id,
-                    PregnancyWeekTranslation.language_code == lang,
-                )
-            )
-        ).scalar_one_or_none()
-        item["translation"] = _row(tr) if tr else None
-        out.append(item)
+        tr = await translation_or_en(
+            db,
+            model=PregnancyWeekTranslation,
+            id_column=PregnancyWeekTranslation.pregnancy_week_id,
+            entity_id=w.id,
+            lang=lang,
+        )
+        out.append(CmsItemOut.model_validate(cms_item(w, tr)))
     return out
 
 
 @router.get("/children")
-async def list_children(user: RequirePatient, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(Child).where(Child.user_id == user.id))).scalars().all()]
+async def list_children(user: RequirePatient, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(Child).where(Child.user_id == user.id))).scalars().all()]
 
 
 @router.post("/children")
-async def create_child(body: ChildIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def create_child(body: ChildIn, user: RequirePatient, db: DbDep):
     row = Child(user_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.patch("/children/{child_id}")
-async def patch_child(child_id: UUID, body: ChildIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def patch_child(child_id: UUID, body: ChildIn, user: RequirePatient, db: DbDep):
     row = (await db.execute(select(Child).where(Child.id == child_id, Child.user_id == user.id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(row, k, v)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/cms/child-growth-periods")
-async def cms_growth_periods(db: AsyncSession = Depends(get_db), lang: str = "en"):
+async def cms_growth_periods(db: DbDep, lang: LangDep) -> list[CmsItemOut]:
     periods = (
         await db.execute(select(ChildGrowthPeriod).where(ChildGrowthPeriod.is_published.is_(True)))
     ).scalars().all()
-    out = []
+    out: list[CmsItemOut] = []
     for p in periods:
-        item = _row(p)
-        tr = (
-            await db.execute(
-                select(ChildGrowthPeriodTranslation).where(
-                    ChildGrowthPeriodTranslation.period_id == p.id,
-                    ChildGrowthPeriodTranslation.language_code == lang,
-                )
-            )
-        ).scalar_one_or_none()
-        item["translation"] = _row(tr) if tr else None
-        out.append(item)
+        tr = await translation_or_en(
+            db,
+            model=ChildGrowthPeriodTranslation,
+            id_column=ChildGrowthPeriodTranslation.period_id,
+            entity_id=p.id,
+            lang=lang,
+        )
+        out.append(CmsItemOut.model_validate(cms_item(p, tr)))
     return out
 
 
 @router.post("/child-measurements")
-async def add_measurement(body: MeasurementIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def add_measurement(body: MeasurementIn, user: RequirePatient, db: DbDep):
     data = body.model_dump()
     if data.get("measured_on") is None:
         data.pop("measured_on", None)
     row = ChildGrowthMeasurement(user_id=user.id, **{k: v for k, v in data.items() if v is not None or k == "child_local_id"})
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/child-measurements")
-async def list_measurements(user: RequirePatient, child_local_id: str, db: AsyncSession = Depends(get_db)):
+async def list_measurements(user: RequirePatient, child_local_id: str, db: DbDep):
     rows = (
         await db.execute(
             select(ChildGrowthMeasurement).where(
@@ -304,19 +312,19 @@ async def list_measurements(user: RequirePatient, child_local_id: str, db: Async
             )
         )
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/child-milestones")
-async def add_milestone(body: MilestoneIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def add_milestone(body: MilestoneIn, user: RequirePatient, db: DbDep):
     row = ChildMilestoneCheck(user_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/child-milestones")
-async def list_milestones(user: RequirePatient, child_local_id: str, db: AsyncSession = Depends(get_db)):
+async def list_milestones(user: RequirePatient, child_local_id: str, db: DbDep):
     rows = (
         await db.execute(
             select(ChildMilestoneCheck).where(
@@ -325,11 +333,11 @@ async def list_milestones(user: RequirePatient, child_local_id: str, db: AsyncSe
             )
         )
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/child-vaccines")
-async def upsert_vaccine(body: VaccineIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def upsert_vaccine(body: VaccineIn, user: RequirePatient, db: DbDep):
     existing = (
         await db.execute(
             select(ChildVaccineRecord).where(
@@ -343,15 +351,15 @@ async def upsert_vaccine(body: VaccineIn, user: RequirePatient, db: AsyncSession
         for k, v in body.model_dump().items():
             setattr(existing, k, v)
         await db.flush()
-        return _row(existing)
+        return _out(existing)
     row = ChildVaccineRecord(user_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/child-vaccines")
-async def list_vaccines(user: RequirePatient, child_local_id: str, db: AsyncSession = Depends(get_db)):
+async def list_vaccines(user: RequirePatient, child_local_id: str, db: DbDep):
     rows = (
         await db.execute(
             select(ChildVaccineRecord).where(
@@ -360,11 +368,11 @@ async def list_vaccines(user: RequirePatient, child_local_id: str, db: AsyncSess
             )
         )
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/child-followups")
-async def list_followups(user: RequirePatient, child_local_id: str, db: AsyncSession = Depends(get_db)):
+async def list_followups(user: RequirePatient, child_local_id: str, db: DbDep):
     rows = (
         await db.execute(
             select(ChildFollowupVisit).where(
@@ -373,96 +381,94 @@ async def list_followups(user: RequirePatient, child_local_id: str, db: AsyncSes
             )
         )
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/cms/vaccine-schedule")
-async def vaccine_schedule(db: AsyncSession = Depends(get_db)):
+async def vaccine_schedule(db: DbDep):
     rows = (
         await db.execute(select(VaccineDoseSchedule).where(VaccineDoseSchedule.is_published.is_(True)))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/cms/clinical-advice")
-async def clinical_advice(db: AsyncSession = Depends(get_db), lang: str = "en"):
+async def clinical_advice(db: DbDep, lang: LangDep) -> list[CmsItemOut]:
     rows = (await db.execute(select(GrowthClinicalAdvice).where(GrowthClinicalAdvice.is_active.is_(True)))).scalars().all()
-    out = []
+    out: list[CmsItemOut] = []
     for r in rows:
-        item = _row(r)
-        tr = (
-            await db.execute(
-                select(GrowthClinicalAdviceTranslation).where(
-                    GrowthClinicalAdviceTranslation.advice_id == r.id,
-                    GrowthClinicalAdviceTranslation.language_code == lang,
-                )
-            )
-        ).scalar_one_or_none()
-        item["translation"] = _row(tr) if tr else None
-        out.append(item)
+        tr = await translation_or_en(
+            db,
+            model=GrowthClinicalAdviceTranslation,
+            id_column=GrowthClinicalAdviceTranslation.advice_id,
+            entity_id=r.id,
+            lang=lang,
+        )
+        out.append(CmsItemOut.model_validate(cms_item(r, tr)))
     return out
 
 
 @router.get("/cms/daily-tips")
-async def daily_tips(db: AsyncSession = Depends(get_db), week_number: int | None = None, lang: str = "en"):
+async def daily_tips(db: DbDep, lang: LangDep, week_number: int | None = None) -> list[CmsItemOut]:
     q = select(DailyTip).where(DailyTip.is_active.is_(True))
     if week_number is not None:
         q = q.where(DailyTip.week_number == week_number)
     tips = (await db.execute(q)).scalars().all()
-    out = []
+    out: list[CmsItemOut] = []
     for t in tips:
-        item = _row(t)
-        tr = (
-            await db.execute(
-                select(DailyTipTranslation).where(
-                    DailyTipTranslation.tip_id == t.id,
-                    DailyTipTranslation.language_code == lang,
-                )
-            )
-        ).scalar_one_or_none()
-        item["translation"] = _row(tr) if tr else None
-        out.append(item)
+        tr = await translation_or_en(
+            db,
+            model=DailyTipTranslation,
+            id_column=DailyTipTranslation.tip_id,
+            entity_id=t.id,
+            lang=lang,
+        )
+        out.append(CmsItemOut.model_validate(cms_item(t, tr)))
     return out
 
 
 @router.get("/cms/symptoms")
-async def symptoms(db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(SymptomCatalog))).scalars().all()]
+async def symptoms(db: DbDep):
+    return [_out(r) for r in (await db.execute(select(SymptomCatalog))).scalars().all()]
 
 
 @router.get("/cms/legal/{slug}")
-async def legal(slug: str, db: AsyncSession = Depends(get_db), locale: str = "en"):
+async def legal(slug: str, db: DbDep, lang: LangDep) -> RowOut:
     row = (
-        await db.execute(select(LegalDocument).where(LegalDocument.slug == slug, LegalDocument.locale == locale))
+        await db.execute(select(LegalDocument).where(LegalDocument.slug == slug, LegalDocument.locale == lang))
     ).scalar_one_or_none()
+    if row is None and lang != "en":
+        row = (
+            await db.execute(select(LegalDocument).where(LegalDocument.slug == slug, LegalDocument.locale == "en"))
+        ).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/settings/{setting_id}")
-async def get_setting(setting_id: str, db: AsyncSession = Depends(get_db)):
+async def get_setting(setting_id: str, db: DbDep):
     row = (await db.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
     return row.data if row else {}
 
 
 @router.get("/doctors")
-async def list_doctors(db: AsyncSession = Depends(get_db), category_id: UUID | None = None, verified_only: bool = True):
+async def list_doctors(db: DbDep, category_id: UUID | None = None, verified_only: bool = True):
     q = select(DoctorProfile)
     if verified_only:
         q = q.where(DoctorProfile.is_verified.is_(True))
     if category_id:
         q = q.where(DoctorProfile.category_id == category_id)
-    return [_row(r) for r in (await db.execute(q)).scalars().all()]
+    return [_out(r) for r in (await db.execute(q)).scalars().all()]
 
 
 @router.get("/doctors/categories")
-async def doctor_categories(db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(DoctorCategory).where(DoctorCategory.is_active.is_(True)))).scalars().all()]
+async def doctor_categories(db: DbDep):
+    return [_out(r) for r in (await db.execute(select(DoctorCategory).where(DoctorCategory.is_active.is_(True)))).scalars().all()]
 
 
 @router.get("/doctors/{doctor_id}")
-async def doctor_detail(doctor_id: UUID, db: AsyncSession = Depends(get_db)):
+async def doctor_detail(doctor_id: UUID, db: DbDep) -> DoctorDetailOut:
     doctor = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))).scalar_one_or_none()
     if doctor is None:
         raise HTTPException(404)
@@ -479,11 +485,15 @@ async def doctor_detail(doctor_id: UUID, db: AsyncSession = Depends(get_db)):
             )
         )
     ).scalars().all()
-    return {"doctor": _row(doctor), "services": [_row(s) for s in services], "slots": [_row(s) for s in slots]}
+    return DoctorDetailOut(
+        doctor=_out(doctor),
+        services=[_out(s) for s in services],
+        slots=[_out(s) for s in slots],
+    )
 
 
 @router.post("/appointments")
-async def book_appointment(body: BookIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def book_appointment(body: BookIn, user: RequirePatient, db: DbDep) -> AppointmentOut:
     profile = (await db.execute(select(Profile).where(Profile.id == user.id))).scalar_one()
     service = None
     if body.service_id:
@@ -493,6 +503,7 @@ async def book_appointment(body: BookIn, user: RequirePatient, db: AsyncSession 
         raise HTTPException(404, "Doctor not found")
     total = service.price if service else Decimal("0")
     prepay = total if doctor.prepayment_mode == "full" else Decimal("0")
+    # ponytail: never trust client amount_paid — mark paid only via Chapa webhook / admin
     row = Appointment(
         doctor_id=body.doctor_id,
         patient_id=user.id,
@@ -510,15 +521,17 @@ async def book_appointment(body: BookIn, user: RequirePatient, db: AsyncSession 
         prepayment_percent=doctor.prepayment_percent,
         total_amount=total,
         prepayment_amount=prepay,
-        amount_paid=body.amount_paid,
-        payment_status="paid" if body.amount_paid >= prepay and prepay > 0 else ("unpaid" if prepay > 0 else "waived"),
+        amount_paid=Decimal("0"),
+        payment_status="unpaid" if prepay > 0 else "waived",
         payment_method=body.payment_method,
-        chapa_tx_ref=body.chapa_tx_ref,
         care_subscription_id=body.care_subscription_id,
         status="pending",
     )
     db.add(row)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(409, "Slot already booked") from exc
     db.add(
         ChatConversation(
             appointment_id=row.id,
@@ -527,17 +540,17 @@ async def book_appointment(body: BookIn, user: RequirePatient, db: AsyncSession 
         )
     )
     await db.flush()
-    return _row(row)
+    return AppointmentOut.model_validate(row_dict(row))
 
 
 @router.get("/appointments")
-async def my_appointments(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def my_appointments(user: RequirePatient, db: DbDep) -> list[AppointmentOut]:
     rows = (await db.execute(select(Appointment).where(Appointment.patient_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [AppointmentOut.model_validate(row_dict(r)) for r in rows]
 
 
 @router.post("/appointments/{appointment_id}/cancel")
-async def cancel_appointment(appointment_id: UUID, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def cancel_appointment(appointment_id: UUID, user: RequirePatient, db: DbDep):
     from app.core.services.booking_finance import cancel_appointment as do_cancel
 
     row = (
@@ -546,11 +559,11 @@ async def cancel_appointment(appointment_id: UUID, user: RequirePatient, db: Asy
     if row is None:
         raise HTTPException(404)
     await do_cancel(db, row, cancelled_by="patient")
-    return _row(row)
+    return _out(row)
 
 
 @router.post("/reviews")
-async def create_review(body: ReviewIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def create_review(body: ReviewIn, user: RequirePatient, db: DbDep):
     appt = (
         await db.execute(
             select(Appointment).where(Appointment.id == body.appointment_id, Appointment.patient_id == user.id)
@@ -568,17 +581,17 @@ async def create_review(body: ReviewIn, user: RequirePatient, db: AsyncSession =
     )
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/chat/conversations")
-async def chat_conversations(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def chat_conversations(user: RequirePatient, db: DbDep):
     rows = (await db.execute(select(ChatConversation).where(ChatConversation.patient_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/chat/conversations/{conversation_id}/messages")
-async def chat_messages(conversation_id: UUID, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def chat_messages(conversation_id: UUID, user: RequirePatient, db: DbDep):
     conv = (
         await db.execute(
             select(ChatConversation).where(ChatConversation.id == conversation_id, ChatConversation.patient_id == user.id)
@@ -589,11 +602,11 @@ async def chat_messages(conversation_id: UUID, user: RequirePatient, db: AsyncSe
     rows = (
         await db.execute(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id).order_by(ChatMessage.created_at))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/chat/conversations/{conversation_id}/messages")
-async def send_chat(conversation_id: UUID, body: ChatIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def send_chat(conversation_id: UUID, body: ChatIn, user: RequirePatient, db: DbDep):
     from datetime import UTC, datetime
 
     conv = (
@@ -609,19 +622,19 @@ async def send_chat(conversation_id: UUID, body: ChatIn, user: RequirePatient, d
     conv.last_message_at = datetime.now(UTC)
     conv.doctor_unread_count += 1
     await db.flush()
-    return _row(msg)
+    return _out(msg)
 
 
 @router.get("/notifications")
-async def notifications(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def notifications(user: RequirePatient, db: DbDep):
     rows = (
         await db.execute(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/notifications/{notification_id}/read")
-async def read_notification(notification_id: UUID, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def read_notification(notification_id: UUID, user: RequirePatient, db: DbDep):
     from datetime import UTC, datetime
 
     row = (
@@ -631,11 +644,11 @@ async def read_notification(notification_id: UUID, user: RequirePatient, db: Asy
         raise HTTPException(404)
     row.read_at = datetime.now(UTC)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/wallet")
-async def wallet(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def wallet(user: RequirePatient, db: DbDep) -> WalletBundleOut:
     w = (await db.execute(select(PatientWallet).where(PatientWallet.patient_id == user.id))).scalar_one_or_none()
     txs = (
         await db.execute(
@@ -644,33 +657,33 @@ async def wallet(user: RequirePatient, db: AsyncSession = Depends(get_db)):
             .order_by(PatientWalletTransaction.created_at.desc())
         )
     ).scalars().all()
-    return {"wallet": _row(w) if w else None, "transactions": [_row(t) for t in txs]}
+    return WalletBundleOut(wallet=_out(w) if w else None, transactions=[_out(t) for t in txs])
 
 
 @router.post("/wallet/withdraw")
-async def wallet_withdraw(body: WithdrawIn, user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def wallet_withdraw(body: WithdrawIn, user: RequirePatient, db: DbDep):
     w = (await db.execute(select(PatientWallet).where(PatientWallet.patient_id == user.id))).scalar_one_or_none()
     if w is None or w.balance < body.amount:
         raise HTTPException(400, "Insufficient balance")
     req = PatientWalletWithdrawalRequest(patient_id=user.id, amount=body.amount, note=body.note)
     db.add(req)
     await db.flush()
-    return _row(req)
+    return _out(req)
 
 
 @router.get("/subscriptions/app")
-async def app_subscription(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def app_subscription(user: RequirePatient, db: DbDep):
     row = (
         await db.execute(
             select(AppSubscription).where(AppSubscription.patient_id == user.id, AppSubscription.status == "active")
         )
     ).scalar_one_or_none()
-    return _row(row) if row else None
+    return _out(row) if row else None
 
 
 @router.get("/subscriptions/care")
-async def care_subscriptions(user: RequirePatient, db: AsyncSession = Depends(get_db)):
+async def care_subscriptions(user: RequirePatient, db: DbDep):
     rows = (
         await db.execute(select(CareSubscription).where(CareSubscription.patient_id == user.id))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]

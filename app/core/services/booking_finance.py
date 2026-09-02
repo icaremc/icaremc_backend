@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -26,7 +25,8 @@ async def credit_doctor_on_complete(db: AsyncSession, appt: Appointment) -> None
     ).scalar_one_or_none()
     if existing:
         return
-    amount = appt.amount_paid or appt.total_amount or Decimal("0")
+    # Only credit verified paid amount — never fall back to total_amount for unpaid bookings
+    amount = appt.amount_paid if appt.payment_status == "paid" else Decimal("0")
     if amount <= 0:
         appt.status = "completed"
         await db.flush()
@@ -53,33 +53,29 @@ async def credit_doctor_on_complete(db: AsyncSession, appt: Appointment) -> None
 async def cancel_appointment(db: AsyncSession, appt: Appointment, *, cancelled_by: str) -> None:
     if appt.status == "cancelled":
         return
+    paid = appt.amount_paid or Decimal("0")
+    was_completed = appt.status == "completed"
     appt.status = "cancelled"
     appt.cancelled_by = cancelled_by
-    paid = appt.amount_paid or Decimal("0")
-    if cancelled_by == "patient" and paid > 0:
-        wallet = (
-            await db.execute(select(PatientWallet).where(PatientWallet.patient_id == appt.patient_id))
-        ).scalar_one_or_none()
-        if wallet is None:
-            wallet = PatientWallet(patient_id=appt.patient_id)
-            db.add(wallet)
-            await db.flush()
-        wallet.balance += paid
-        db.add(
-            PatientWalletTransaction(
-                patient_id=appt.patient_id,
-                amount=paid,
-                is_credit=True,
-                type="appointment_refund",
-                appointment_id=appt.id,
-            )
-        )
-        appt.payment_status = "waived"
-    if cancelled_by == "doctor" and paid > 0:
-        wallet = (
-            await db.execute(select(DoctorWallet).where(DoctorWallet.doctor_id == appt.doctor_id))
-        ).scalar_one_or_none()
-        if wallet and wallet.available_balance >= paid:
+
+    if paid <= 0:
+        await db.flush()
+        return
+
+    if cancelled_by == "patient":
+        await _refund_patient(db, appt, paid)
+        appt.payment_status = "refunded"
+        await db.flush()
+        return
+
+    if cancelled_by == "doctor":
+        # ponytail: never mint patient credit without a funding source
+        if was_completed:
+            wallet = (
+                await db.execute(select(DoctorWallet).where(DoctorWallet.doctor_id == appt.doctor_id))
+            ).scalar_one_or_none()
+            if wallet is None or wallet.available_balance < paid:
+                raise ValueError("Insufficient doctor balance to refund patient")
             wallet.available_balance -= paid
             db.add(
                 WalletTransaction(
@@ -90,24 +86,29 @@ async def cancel_appointment(db: AsyncSession, appt: Appointment, *, cancelled_b
                     appointment_id=appt.id,
                 )
             )
-        patient_wallet = (
-            await db.execute(select(PatientWallet).where(PatientWallet.patient_id == appt.patient_id))
-        ).scalar_one_or_none()
-        if patient_wallet is None:
-            patient_wallet = PatientWallet(patient_id=appt.patient_id)
-            db.add(patient_wallet)
-            await db.flush()
-        patient_wallet.balance += paid
-        db.add(
-            PatientWalletTransaction(
-                patient_id=appt.patient_id,
-                amount=paid,
-                is_credit=True,
-                type="appointment_refund",
-                appointment_id=appt.id,
-            )
-        )
+        await _refund_patient(db, appt, paid)
+        appt.payment_status = "refunded"
     await db.flush()
+
+
+async def _refund_patient(db: AsyncSession, appt: Appointment, paid: Decimal) -> None:
+    patient_wallet = (
+        await db.execute(select(PatientWallet).where(PatientWallet.patient_id == appt.patient_id))
+    ).scalar_one_or_none()
+    if patient_wallet is None:
+        patient_wallet = PatientWallet(patient_id=appt.patient_id)
+        db.add(patient_wallet)
+        await db.flush()
+    patient_wallet.balance += paid
+    db.add(
+        PatientWalletTransaction(
+            patient_id=appt.patient_id,
+            amount=paid,
+            is_credit=True,
+            type="appointment_refund",
+            appointment_id=appt.id,
+        )
+    )
 
 
 async def request_doctor_payout(

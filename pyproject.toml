@@ -5,7 +5,7 @@ description = "FastAPI application"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi",
+    "fastapi[standard]",
     "uvicorn[standard]",
     "sqlalchemy",
     "alembic",
@@ -18,3 +18,29 @@ dependencies = [
     "email-validator>=2.3.0",
     "greenlet>=3.5.5",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.fastapi]
+entrypoint = "app.main:app"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"

@@ -2,14 +2,15 @@ from datetime import time
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.schemas import OkOut, RowOut, WalletBundleOut
 from app.core.security.deps import RequireDoctor
 from app.core.services.booking_finance import cancel_appointment, credit_doctor_on_complete, request_doctor_payout
-from app.persistence.sqlalchemy.deps import get_db
+from app.persistence.sqlalchemy.deps import DbDep
+from app.persistence.sqlalchemy.serialize import row_dict
 from app.persistence.sqlalchemy.models import (
     Appointment,
     AppointmentReview,
@@ -33,8 +34,8 @@ from app.persistence.sqlalchemy.models import (
 router = APIRouter(prefix="/doctor", tags=["doctor"])
 
 
-def _row(obj) -> dict:
-    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+def _out(obj) -> RowOut:
+    return RowOut.model_validate(row_dict(obj) if hasattr(obj, "__table__") else obj)
 
 
 class ProfileUpdate(BaseModel):
@@ -106,38 +107,38 @@ class ChatIn(BaseModel):
 
 
 @router.get("/me")
-async def me(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def me(user: RequireDoctor, db: DbDep):
     row = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == user.id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
-    return _row(row)
+    return _out(row)
 
 
 @router.patch("/me")
-async def patch_me(body: ProfileUpdate, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def patch_me(body: ProfileUpdate, user: RequireDoctor, db: DbDep):
     row = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == user.id))).scalar_one()
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(row, k, v)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/services")
-async def list_services(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def list_services(user: RequireDoctor, db: DbDep):
     rows = (await db.execute(select(DoctorService).where(DoctorService.doctor_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/services")
-async def create_service(body: ServiceIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def create_service(body: ServiceIn, user: RequireDoctor, db: DbDep):
     row = DoctorService(doctor_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.patch("/services/{service_id}")
-async def patch_service(service_id: UUID, body: ServiceIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def patch_service(service_id: UUID, body: ServiceIn, user: RequireDoctor, db: DbDep):
     row = (
         await db.execute(select(DoctorService).where(DoctorService.id == service_id, DoctorService.doctor_id == user.id))
     ).scalar_one_or_none()
@@ -146,11 +147,11 @@ async def patch_service(service_id: UUID, body: ServiceIn, user: RequireDoctor, 
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(row, k, v)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.delete("/services/{service_id}")
-async def delete_service(service_id: UUID, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def delete_service(service_id: UUID, user: RequireDoctor, db: DbDep):
     open_count = (
         await db.execute(
             select(func.count())
@@ -170,27 +171,27 @@ async def delete_service(service_id: UUID, user: RequireDoctor, db: AsyncSession
         raise HTTPException(404)
     await db.delete(row)
     await db.flush()
-    return {"ok": True}
+    return OkOut()
 
 
 @router.get("/slots")
-async def list_slots(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def list_slots(user: RequireDoctor, db: DbDep) -> list[RowOut]:
     rows = (
         await db.execute(select(DoctorAvailabilitySlot).where(DoctorAvailabilitySlot.doctor_id == user.id))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/slots")
-async def create_slot(body: SlotIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def create_slot(body: SlotIn, user: RequireDoctor, db: DbDep):
     row = DoctorAvailabilitySlot(doctor_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.delete("/slots/{slot_id}")
-async def delete_slot(slot_id: UUID, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def delete_slot(slot_id: UUID, user: RequireDoctor, db: DbDep):
     row = (
         await db.execute(
             select(DoctorAvailabilitySlot).where(
@@ -203,17 +204,17 @@ async def delete_slot(slot_id: UUID, user: RequireDoctor, db: AsyncSession = Dep
         raise HTTPException(404)
     await db.delete(row)
     await db.flush()
-    return {"ok": True}
+    return OkOut()
 
 
 @router.get("/appointments")
-async def appointments(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def appointments(user: RequireDoctor, db: DbDep) -> list[RowOut]:
     rows = (await db.execute(select(Appointment).where(Appointment.doctor_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/appointments/{appointment_id}/status")
-async def set_status(appointment_id: UUID, body: StatusIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def set_status(appointment_id: UUID, body: StatusIn, user: RequireDoctor, db: DbDep):
     row = (
         await db.execute(
             select(Appointment).where(Appointment.id == appointment_id, Appointment.doctor_id == user.id)
@@ -224,15 +225,18 @@ async def set_status(appointment_id: UUID, body: StatusIn, user: RequireDoctor, 
     if body.status == "completed":
         await credit_doctor_on_complete(db, row)
     elif body.status == "cancelled":
-        await cancel_appointment(db, row, cancelled_by="doctor")
+        try:
+            await cancel_appointment(db, row, cancelled_by="doctor")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     else:
         row.status = body.status
         await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/wallet")
-async def wallet(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def wallet(user: RequireDoctor, db: DbDep) -> WalletBundleOut:
     w = (await db.execute(select(DoctorWallet).where(DoctorWallet.doctor_id == user.id))).scalar_one_or_none()
     txs = (
         await db.execute(
@@ -241,27 +245,27 @@ async def wallet(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
             .order_by(WalletTransaction.created_at.desc())
         )
     ).scalars().all()
-    return {"wallet": _row(w) if w else None, "transactions": [_row(t) for t in txs]}
+    return WalletBundleOut(wallet=_out(w) if w else None, transactions=[_out(t) for t in txs])
 
 
 @router.get("/payout-methods")
-async def payout_methods(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def payout_methods(user: RequireDoctor, db: DbDep):
     rows = (
         await db.execute(select(DoctorPayoutMethod).where(DoctorPayoutMethod.doctor_id == user.id))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/payout-methods")
-async def create_payout_method(body: PayoutMethodIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def create_payout_method(body: PayoutMethodIn, user: RequireDoctor, db: DbDep):
     row = DoctorPayoutMethod(doctor_id=user.id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.post("/payouts")
-async def create_payout(body: PayoutIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def create_payout(body: PayoutIn, user: RequireDoctor, db: DbDep):
     try:
         req = await request_doctor_payout(
             db,
@@ -272,19 +276,19 @@ async def create_payout(body: PayoutIn, user: RequireDoctor, db: AsyncSession = 
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return _row(req)
+    return _out(req)
 
 
 @router.get("/payouts")
-async def list_payouts(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def list_payouts(user: RequireDoctor, db: DbDep):
     rows = (
         await db.execute(select(DoctorPayoutRequest).where(DoctorPayoutRequest.doctor_id == user.id))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/referrals")
-async def referrals(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def referrals(user: RequireDoctor, db: DbDep):
     doctor = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == user.id))).scalar_one()
     refs = (await db.execute(select(DoctorReferral).where(DoctorReferral.doctor_id == user.id))).scalars().all()
     commissions = (
@@ -292,32 +296,32 @@ async def referrals(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
     ).scalars().all()
     return {
         "referral_code": doctor.referral_code,
-        "referrals": [_row(r) for r in refs],
-        "commissions": [_row(c) for c in commissions],
+        "referrals": [_out(r) for r in refs],
+        "commissions": [_out(c) for c in commissions],
     }
 
 
 @router.get("/hospitals")
-async def hospitals(db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(Hospital).where(Hospital.is_active.is_(True)))).scalars().all()]
+async def hospitals(db: DbDep):
+    return [_out(r) for r in (await db.execute(select(Hospital).where(Hospital.is_active.is_(True)))).scalars().all()]
 
 
 @router.post("/hospitals/{hospital_id}/affiliate")
-async def affiliate(hospital_id: UUID, user: RequireDoctor, db: AsyncSession = Depends(get_db), is_primary: bool = False):
+async def affiliate(hospital_id: UUID, user: RequireDoctor, db: DbDep, is_primary: bool = False):
     row = DoctorHospitalAffiliation(doctor_id=user.id, hospital_id=hospital_id, is_primary=is_primary)
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/chat/conversations")
-async def conversations(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def conversations(user: RequireDoctor, db: DbDep):
     rows = (await db.execute(select(ChatConversation).where(ChatConversation.doctor_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/chat/conversations/{conversation_id}/messages")
-async def messages(conversation_id: UUID, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def messages(conversation_id: UUID, user: RequireDoctor, db: DbDep):
     conv = (
         await db.execute(
             select(ChatConversation).where(ChatConversation.id == conversation_id, ChatConversation.doctor_id == user.id)
@@ -328,11 +332,11 @@ async def messages(conversation_id: UUID, user: RequireDoctor, db: AsyncSession 
     rows = (
         await db.execute(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id).order_by(ChatMessage.created_at))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/chat/conversations/{conversation_id}/messages")
-async def send_message(conversation_id: UUID, body: ChatIn, user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def send_message(conversation_id: UUID, body: ChatIn, user: RequireDoctor, db: DbDep):
     from datetime import UTC, datetime
 
     conv = (
@@ -348,24 +352,24 @@ async def send_message(conversation_id: UUID, body: ChatIn, user: RequireDoctor,
     conv.last_message_at = datetime.now(UTC)
     conv.patient_unread_count += 1
     await db.flush()
-    return _row(msg)
+    return _out(msg)
 
 
 @router.get("/notifications")
-async def notifications(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def notifications(user: RequireDoctor, db: DbDep):
     rows = (
         await db.execute(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/reviews")
-async def reviews(user: RequireDoctor, db: AsyncSession = Depends(get_db)):
+async def reviews(user: RequireDoctor, db: DbDep):
     rows = (await db.execute(select(AppointmentReview).where(AppointmentReview.doctor_id == user.id))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/settings/version")
-async def version_policy(db: AsyncSession = Depends(get_db)):
+async def version_policy(db: DbDep):
     row = (await db.execute(select(AppSetting).where(AppSetting.id == "doctors_version"))).scalar_one_or_none()
     return row.data if row else {}

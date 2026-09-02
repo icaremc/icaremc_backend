@@ -1,14 +1,14 @@
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.schemas import PushOut
 from app.config import MySettings
 from app.core.security.deps import RequireAdmin
-from app.persistence.sqlalchemy.deps import get_db
+from app.persistence.sqlalchemy.deps import DbDep
 from app.persistence.sqlalchemy.models import DoctorProfile, Notification, Profile
 
 router = APIRouter(prefix="/push", tags=["push"])
@@ -39,7 +39,7 @@ async def send_fcm(token: str, title: str, body: str, data: dict | None = None) 
 
 
 @router.post("/notify")
-async def notify(body: PushIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def notify(body: PushIn, user: RequireAdmin, db: DbDep) -> PushOut:
     db.add(
         Notification(
             user_id=body.user_id,
@@ -56,4 +56,4 @@ async def notify(body: PushIn, user: RequireAdmin, db: AsyncSession = Depends(ge
         token = doctor.fcm_token if doctor else None
     result = await send_fcm(token or "", body.title, body.body, body.data)
     await db.flush()
-    return {"ok": True, "fcm": result}
+    return PushOut(fcm=result)

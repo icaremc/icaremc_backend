@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -33,7 +34,8 @@ class User(Base):
     phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    role: Mapped[str] = mapped_column(String(32), nullable=False)  # patient|doctor|admin
+    role: Mapped[str] = mapped_column(String(32), nullable=False)  # legacy primary; prefer roles[]
+    roles: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list, server_default=text("'{}'"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -60,7 +62,8 @@ class Profile(Base):
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     referral_code_used: Mapped[str | None] = mapped_column(Text)
     referred_by_doctor_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("doctor_profiles.id", use_alter=True)
+        UUID(as_uuid=True),
+        ForeignKey("doctor_profiles.id", name="fk_profiles_referred_doctor", use_alter=True),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -250,7 +253,13 @@ class CareSubscription(Base):
 
 class Appointment(Base):
     __tablename__ = "appointments"
-    __table_args__ = (UniqueConstraint("doctor_id", "appointment_date", "time_slot"),)
+    # drizzle-patterns → SQLAlchemy: index FKs + hot filters (list-by-doctor/patient/date)
+    __table_args__ = (
+        UniqueConstraint("doctor_id", "appointment_date", "time_slot"),
+        Index("ix_appointments_doctor_id", "doctor_id"),
+        Index("ix_appointments_patient_id", "patient_id"),
+        Index("ix_appointments_appointment_date", "appointment_date"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     doctor_id: Mapped[uuid.UUID] = mapped_column(

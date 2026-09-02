@@ -7,10 +7,12 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequireAdmin
 from app.core.security.tokens import hash_password
 from app.core.services.auth_service import ensure_admin
-from app.persistence.sqlalchemy.deps import get_db
+from app.persistence.sqlalchemy.deps import DbDep
+from app.persistence.sqlalchemy.serialize import row_dict
 from app.persistence.sqlalchemy.models import (
     AdminActivityLog,
     AdminDocument,
@@ -46,8 +48,8 @@ from app.persistence.sqlalchemy.models import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _row(obj) -> dict:
-    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+def _out(obj) -> RowOut:
+    return RowOut.model_validate(row_dict(obj) if hasattr(obj, "__table__") else obj)
 
 
 class SettingIn(BaseModel):
@@ -138,7 +140,7 @@ async def _log(db: AsyncSession, admin: RequireAdmin, event_type: str, event_lab
 
 
 @router.get("/dashboard")
-async def dashboard(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def dashboard(user: RequireAdmin, db: DbDep):
     async def count(model):
         return (await db.execute(select(func.count()).select_from(model))).scalar_one()
 
@@ -156,51 +158,51 @@ async def dashboard(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/users")
-async def list_users(user: RequireAdmin, db: AsyncSession = Depends(get_db), limit: int = 100, offset: int = 0):
+async def list_users(user: RequireAdmin, db: DbDep, limit: int = 100, offset: int = 0):
     rows = (await db.execute(select(Profile).offset(offset).limit(limit))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/users/{user_id}")
-async def user_detail(user_id: UUID, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def user_detail(user_id: UUID, user: RequireAdmin, db: DbDep):
     profile = (await db.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()
     if profile is None:
         raise HTTPException(404)
     pregnancies = (await db.execute(select(Pregnancy).where(Pregnancy.user_id == user_id))).scalars().all()
     children = (await db.execute(select(Child).where(Child.user_id == user_id))).scalars().all()
-    return {"profile": _row(profile), "pregnancies": [_row(p) for p in pregnancies], "children": [_row(c) for c in children]}
+    return {"profile": _out(profile), "pregnancies": [_out(p) for p in pregnancies], "children": [_out(c) for c in children]}
 
 
 @router.get("/doctors")
-async def list_doctors(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(DoctorProfile))).scalars().all()]
+async def list_doctors(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(DoctorProfile))).scalars().all()]
 
 
 @router.post("/doctors/{doctor_id}/verify")
-async def verify_doctor(doctor_id: UUID, body: DoctorVerifyIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def verify_doctor(doctor_id: UUID, body: DoctorVerifyIn, user: RequireAdmin, db: DbDep):
     row = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
     row.is_verified = body.is_verified
     await _log(db, user, "doctor.verify", "Doctor verification updated", doctor_id=str(doctor_id))
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/appointments")
-async def list_appointments(user: RequireAdmin, db: AsyncSession = Depends(get_db), limit: int = 100):
+async def list_appointments(user: RequireAdmin, db: DbDep, limit: int = 100):
     rows = (await db.execute(select(Appointment).order_by(Appointment.created_at.desc()).limit(limit))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/settings/{setting_id}")
-async def get_setting(setting_id: str, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def get_setting(setting_id: str, user: RequireAdmin, db: DbDep):
     row = (await db.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
     return {"id": setting_id, "data": row.data if row else {}}
 
 
 @router.put("/settings/{setting_id}")
-async def put_setting(setting_id: str, body: SettingIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def put_setting(setting_id: str, body: SettingIn, user: RequireAdmin, db: DbDep):
     row = (await db.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
     if row is None:
         row = AppSetting(id=setting_id, data=body.data)
@@ -213,13 +215,13 @@ async def put_setting(setting_id: str, body: SettingIn, user: RequireAdmin, db: 
 
 
 @router.get("/payout-requests")
-async def payout_requests(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def payout_requests(user: RequireAdmin, db: DbDep):
     rows = (await db.execute(select(DoctorPayoutRequest).order_by(DoctorPayoutRequest.created_at.desc()))).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/payout-requests/{request_id}")
-async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdmin, db: DbDep):
     req = (await db.execute(select(DoctorPayoutRequest).where(DoctorPayoutRequest.id == request_id))).scalar_one_or_none()
     if req is None:
         raise HTTPException(404)
@@ -251,19 +253,19 @@ async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdm
     req.status = body.status
     req.admin_note = body.admin_note
     await db.flush()
-    return _row(req)
+    return _out(req)
 
 
 @router.get("/wallet-transactions")
-async def wallet_transactions(user: RequireAdmin, db: AsyncSession = Depends(get_db), limit: int = 100):
+async def wallet_transactions(user: RequireAdmin, db: DbDep, limit: int = 100):
     rows = (
         await db.execute(select(WalletTransaction).order_by(WalletTransaction.created_at.desc()).limit(limit))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/membership/grant")
-async def grant_membership(body: SubscriptionGrantIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def grant_membership(body: SubscriptionGrantIn, user: RequireAdmin, db: DbDep):
     now = datetime.now(UTC)
     row = AppSubscription(
         patient_id=body.patient_id,
@@ -277,31 +279,31 @@ async def grant_membership(body: SubscriptionGrantIn, user: RequireAdmin, db: As
     )
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.post("/membership/{subscription_id}/revoke")
-async def revoke_membership(subscription_id: UUID, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def revoke_membership(subscription_id: UUID, user: RequireAdmin, db: DbDep):
     row = (await db.execute(select(AppSubscription).where(AppSubscription.id == subscription_id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
     row.status = "cancelled"
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/membership")
-async def list_membership(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(AppSubscription).order_by(AppSubscription.created_at.desc()))).scalars().all()]
+async def list_membership(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(AppSubscription).order_by(AppSubscription.created_at.desc()))).scalars().all()]
 
 
 @router.get("/admins")
-async def list_admins(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(AdminUser))).scalars().all()]
+async def list_admins(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(AdminUser))).scalars().all()]
 
 
 @router.post("/admins")
-async def create_admin(body: AdminCreateIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def create_admin(body: AdminCreateIn, user: RequireAdmin, db: DbDep):
     if user.admin_role != "super_admin":
         raise HTTPException(403, "super_admin required")
     admin_id = await ensure_admin(
@@ -311,80 +313,80 @@ async def create_admin(body: AdminCreateIn, user: RequireAdmin, db: AsyncSession
 
 
 @router.get("/hospitals")
-async def list_hospitals(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(Hospital))).scalars().all()]
+async def list_hospitals(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(Hospital))).scalars().all()]
 
 
 @router.post("/hospitals")
-async def create_hospital(body: HospitalIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def create_hospital(body: HospitalIn, user: RequireAdmin, db: DbDep):
     row = Hospital(**body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.patch("/hospitals/{hospital_id}")
-async def patch_hospital(hospital_id: UUID, body: HospitalIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def patch_hospital(hospital_id: UUID, body: HospitalIn, user: RequireAdmin, db: DbDep):
     row = (await db.execute(select(Hospital).where(Hospital.id == hospital_id))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(row, k, v)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/doctor-categories")
-async def categories(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(DoctorCategory))).scalars().all()]
+async def categories(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(DoctorCategory))).scalars().all()]
 
 
 @router.post("/doctor-categories")
-async def create_category(body: CategoryIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def create_category(body: CategoryIn, user: RequireAdmin, db: DbDep):
     row = DoctorCategory(**body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/pregnancy-weeks")
-async def pregnancy_weeks(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(PregnancyWeek))).scalars().all()]
+async def pregnancy_weeks(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(PregnancyWeek))).scalars().all()]
 
 
 @router.post("/pregnancy-weeks")
-async def create_week(body: WeekIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def create_week(body: WeekIn, user: RequireAdmin, db: DbDep):
     row = PregnancyWeek(**body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.post("/pregnancy-weeks/{week_id}/translations")
-async def week_translation(week_id: UUID, body: WeekTranslationIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def week_translation(week_id: UUID, body: WeekTranslationIn, user: RequireAdmin, db: DbDep):
     row = PregnancyWeekTranslation(pregnancy_week_id=week_id, **body.model_dump())
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/child-growth-periods")
-async def growth_periods(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(ChildGrowthPeriod))).scalars().all()]
+async def growth_periods(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(ChildGrowthPeriod))).scalars().all()]
 
 
 @router.get("/followup-templates")
-async def followup_templates(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(ChildFollowupVisitTemplate))).scalars().all()]
+async def followup_templates(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(ChildFollowupVisitTemplate))).scalars().all()]
 
 
 @router.get("/legal-documents")
-async def legal_docs(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(LegalDocument))).scalars().all()]
+async def legal_docs(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(LegalDocument))).scalars().all()]
 
 
 @router.put("/legal-documents")
-async def upsert_legal(body: LegalIn, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def upsert_legal(body: LegalIn, user: RequireAdmin, db: DbDep):
     row = (
         await db.execute(
             select(LegalDocument).where(LegalDocument.slug == body.slug, LegalDocument.locale == body.locale)
@@ -397,42 +399,42 @@ async def upsert_legal(body: LegalIn, user: RequireAdmin, db: AsyncSession = Dep
         row.title = body.title
         row.sections = body.sections
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/documents")
-async def documents(user: RequireAdmin, db: AsyncSession = Depends(get_db)):
-    return [_row(r) for r in (await db.execute(select(AdminDocument))).scalars().all()]
+async def documents(user: RequireAdmin, db: DbDep):
+    return [_out(r) for r in (await db.execute(select(AdminDocument))).scalars().all()]
 
 
 @router.post("/documents/{document_id}/deliver")
-async def deliver_document(document_id: UUID, recipient_id: UUID, user: RequireAdmin, db: AsyncSession = Depends(get_db)):
+async def deliver_document(document_id: UUID, recipient_id: UUID, user: RequireAdmin, db: DbDep):
     row = DocumentDelivery(document_id=document_id, recipient_id=recipient_id, sent_by=user.id)
     db.add(row)
     await db.flush()
-    return _row(row)
+    return _out(row)
 
 
 @router.get("/activity/admin")
-async def admin_activity(user: RequireAdmin, db: AsyncSession = Depends(get_db), limit: int = 100):
+async def admin_activity(user: RequireAdmin, db: DbDep, limit: int = 100):
     rows = (
         await db.execute(select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc()).limit(limit))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.get("/activity/platform")
-async def platform_activity(user: RequireAdmin, db: AsyncSession = Depends(get_db), limit: int = 100):
+async def platform_activity(user: RequireAdmin, db: DbDep, limit: int = 100):
     rows = (
         await db.execute(select(PlatformActivityLog).order_by(PlatformActivityLog.created_at.desc()).limit(limit))
     ).scalars().all()
-    return [_row(r) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("/bootstrap-super-admin")
 async def bootstrap_super_admin(
     body: AdminCreateIn,
-    db: AsyncSession = Depends(get_db),
+    db: DbDep,
 ):
     """ponytail: one-shot bootstrap when no admins exist; lock down in prod via empty table check."""
     count = (await db.execute(select(func.count()).select_from(AdminUser))).scalar_one()

@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.api.v1.routers import admin, auth, doctor, mother, payments, push
 
@@ -12,6 +13,10 @@ api_v1_router.include_router(payments.router)
 api_v1_router.include_router(push.router)
 
 
+class HealthOut(BaseModel):
+    status: str
+
+
 @api_v1_router.get("/health")
-async def health_check():
-    return {"status": "ok"}
+async def health_check() -> HealthOut:
+    return HealthOut(status="ok")
