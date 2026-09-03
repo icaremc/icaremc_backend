@@ -2,8 +2,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.resources.errors import AppError
+
 
 def register_exception_handlers(app: FastAPI) -> FastAPI:
+    @app.exception_handler(AppError)
+    async def app_error_handler(_request: Request, exc: AppError):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

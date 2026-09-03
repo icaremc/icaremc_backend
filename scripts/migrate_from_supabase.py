@@ -39,7 +39,8 @@ TABLES = [
     "child_growth_measurements",
     "child_milestone_checks",
     "child_vaccine_records",
-    "vaccine_dose_schedules",
+    "vaccine_dose_schedule",
+    "symptom_catalog",
     "daily_tips",
     "daily_tip_translations",
     "growth_clinical_advice",
@@ -94,10 +95,19 @@ async def upsert_user(conn, *, user_id, phone: str, role: str, password_hash: st
 
 
 async def copy_table(conn, src, table: str, dst_cols: dict[str, set[str]]) -> None:
-    try:
-        rows = await src.fetch(f"select * from {table}")
-    except Exception as exc:
-        print(f"skip {table}: {exc}")
+    src_names = [table]
+    if table == "vaccine_dose_schedule":
+        src_names = ["vaccine_dose_schedule", "vaccine_dose_schedules"]
+    rows = None
+    last_exc: Exception | None = None
+    for name in src_names:
+        try:
+            rows = await src.fetch(f"select * from {name}")
+            break
+        except Exception as exc:
+            last_exc = exc
+    if rows is None:
+        print(f"skip {table}: {last_exc}")
         return
     if not rows:
         print(f"empty {table}")
@@ -140,6 +150,8 @@ async def copy_table(conn, src, table: str, dst_cols: dict[str, set[str]]) -> No
                     payload[c] = v or uuid.uuid4()
                     continue
                 v = r[c]
+                if table == "symptom_catalog" and c == "id" and not isinstance(v, uuid.UUID):
+                    v = uuid.uuid5(uuid.NAMESPACE_URL, f"icare-symptom:{v}")
                 lim = limits.get(c)
                 if isinstance(v, str) and lim is not None and len(v) > lim:
                     v = v[:lim]
