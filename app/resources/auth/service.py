@@ -1,7 +1,15 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
-from app.core.security.tokens import create_access_token, hash_password, verify_password
+from app.config import MySettings
+from app.core.security.tokens import (
+    create_access_token,
+    hash_password,
+    hash_refresh_token,
+    new_refresh_token,
+    verify_password,
+)
 from app.core.services.roles import ensure_roles, has_role, roles_of
 from app.core.services.sms_otp import normalize_phone, send_otp, verify_otp
 from app.persistence.sqlalchemy.models import (
@@ -11,6 +19,7 @@ from app.persistence.sqlalchemy.models import (
     DoctorWallet,
     PatientWallet,
     Profile,
+    RefreshToken,
     User,
 )
 from app.resources.auth.repository import AuthRepository
@@ -28,6 +37,33 @@ def _referral_code() -> str:
 class AuthService:
     def __init__(self, repo: AuthRepository) -> None:
         self._repo = repo
+
+    async def _issue_tokens(
+        self, user: User, role: str, *, extra: dict[str, Any] | None = None, admin_role: str | None = None
+    ) -> dict[str, Any]:
+        access = create_access_token(sub=user.id, role=role, extra=extra)
+        raw_refresh = new_refresh_token()
+        self._repo.add(
+            RefreshToken(
+                user_id=user.id,
+                token_hash=hash_refresh_token(raw_refresh),
+                role=role,
+                expires_at=datetime.now(UTC) + timedelta(days=MySettings.JWT_REFRESH_EXPIRE_DAYS),
+            )
+        )
+        await self._repo.flush()
+        out: dict[str, Any] = {
+            "ok": True,
+            "access_token": access,
+            "refresh_token": raw_refresh,
+            "token_type": "bearer",
+            "user_id": str(user.id),
+            "role": role,
+            "roles": roles_of(user),
+        }
+        if admin_role is not None:
+            out["admin_role"] = admin_role
+        return out
 
     async def phone_taken(self, phone: str, role: str | None = None) -> bool:
         phone = normalize_phone(phone)
@@ -106,15 +142,7 @@ class AuthService:
             profile.full_name = full_name or profile.full_name
             await self._repo.flush()
 
-        token = create_access_token(sub=user.id, role="patient")
-        return {
-            "ok": True,
-            "access_token": token,
-            "token_type": "bearer",
-            "user_id": str(user.id),
-            "role": "patient",
-            "roles": roles_of(user),
-        }
+        return await self._issue_tokens(user, "patient")
 
     async def register_doctor(
         self,
@@ -169,15 +197,7 @@ class AuthService:
             self._repo.add(DoctorWallet(doctor_id=user.id))
             await self._repo.flush()
 
-        token = create_access_token(sub=user.id, role="doctor")
-        return {
-            "ok": True,
-            "access_token": token,
-            "token_type": "bearer",
-            "user_id": str(user.id),
-            "role": "doctor",
-            "roles": roles_of(user),
-        }
+        return await self._issue_tokens(user, "doctor")
 
     async def login(self, *, phone: str, password: str, expected_role: str | None = None) -> dict:
         phone = normalize_phone(phone)
@@ -191,15 +211,7 @@ class AuthService:
             doctor = await self._repo.get_doctor(user.id)
             if doctor is None:
                 raise unauthorized("Doctor profile missing")
-        token = create_access_token(sub=user.id, role=active_role)
-        return {
-            "ok": True,
-            "access_token": token,
-            "token_type": "bearer",
-            "user_id": str(user.id),
-            "role": active_role,
-            "roles": roles_of(user),
-        }
+        return await self._issue_tokens(user, active_role)
 
     async def admin_login(self, *, email: str, password: str) -> dict:
         admin = await self._repo.get_admin_by_email(email)
@@ -208,16 +220,41 @@ class AuthService:
         user = await self._repo.get_user(admin.id)
         if user is None or not verify_password(password, user.password_hash):
             raise unauthorized("Invalid credentials")
-        token = create_access_token(sub=user.id, role="admin", extra={"admin_role": admin.admin_role})
-        return {
-            "ok": True,
-            "access_token": token,
-            "token_type": "bearer",
-            "user_id": str(user.id),
-            "role": "admin",
-            "admin_role": admin.admin_role,
-            "roles": ["admin"],
-        }
+        return await self._issue_tokens(
+            user, "admin", extra={"admin_role": admin.admin_role}, admin_role=admin.admin_role
+        )
+
+    async def refresh(self, refresh_token: str) -> dict:
+        from sqlalchemy import select
+
+        row = await self._repo.get_refresh_by_hash(hash_refresh_token(refresh_token))
+        if row is None:
+            raise unauthorized("Invalid refresh token")
+        user = await self._repo.get_user(row.user_id)
+        if user is None or user.deleted_at is not None:
+            raise unauthorized("Invalid refresh token")
+        await self._repo.revoke_refresh(row)
+        extra: dict[str, Any] | None = None
+        admin_role: str | None = None
+        if row.role == "admin":
+            admin_row = (
+                await self._repo.session.execute(
+                    select(AdminUser).where(AdminUser.id == row.user_id, AdminUser.is_active.is_(True))
+                )
+            ).scalar_one_or_none()
+            if admin_row is None:
+                raise unauthorized("Invalid refresh token")
+            admin_role = admin_row.admin_role
+            extra = {"admin_role": admin_role}
+        elif row.role == "doctor" and await self._repo.get_doctor(user.id) is None:
+            raise unauthorized("Invalid refresh token")
+        return await self._issue_tokens(user, row.role, extra=extra, admin_role=admin_role)
+
+    async def logout(self, refresh_token: str) -> dict:
+        row = await self._repo.get_refresh_by_hash(hash_refresh_token(refresh_token))
+        if row is not None:
+            await self._repo.revoke_refresh(row)
+        return {"ok": True}
 
     async def soft_delete_user(self, user_id: UUID, role: str) -> None:
         if role not in ("patient", "doctor"):
@@ -227,6 +264,7 @@ class AuthService:
             raise bad_request("User not found")
         user.deleted_at = datetime.now(UTC)
         user.is_active = False
+        await self._repo.revoke_all_refresh(user_id)
         await self._repo.flush()
 
     async def request_reset_otp(self, phone: str) -> dict:
@@ -236,13 +274,13 @@ class AuthService:
 
     async def reset_password(self, *, phone: str, otp: str, new_password: str) -> dict:
         phone = normalize_phone(phone)
-        db = self._repo.session
         if not await verify_otp(self._repo.session, phone=phone, purpose="reset", code=otp):
             raise bad_request("Invalid OTP")
         user = await self._repo.get_user_by_phone_not_deleted(phone)
         if user is None:
             raise bad_request("User not found")
         user.password_hash = hash_password(new_password)
+        await self._repo.revoke_all_refresh(user.id)
         await self._repo.flush()
         return {"ok": True}
 

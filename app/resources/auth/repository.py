@@ -1,10 +1,17 @@
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.persistence.sqlalchemy.models import AdminUser, DoctorProfile, DoctorReferral, DoctorWallet, PatientWallet, Profile, User
+from app.persistence.sqlalchemy.models import (
+    AdminUser,
+    DoctorProfile,
+    Profile,
+    RefreshToken,
+    User,
+)
 
 
 class AuthRepository(Protocol):
@@ -20,6 +27,9 @@ class AuthRepository(Protocol):
     async def get_doctor_by_referral(self, code: str) -> DoctorProfile | None: ...
     async def referral_code_taken(self, code: str) -> bool: ...
     async def count_admins(self) -> int: ...
+    async def get_refresh_by_hash(self, token_hash: str) -> RefreshToken | None: ...
+    async def revoke_refresh(self, token: RefreshToken) -> None: ...
+    async def revoke_all_refresh(self, user_id: UUID) -> None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
 
@@ -73,6 +83,30 @@ class SqlAlchemyAuthRepository:
         from sqlalchemy import func
 
         return (await self.session.execute(select(func.count()).select_from(AdminUser))).scalar_one()
+
+    async def get_refresh_by_hash(self, token_hash: str) -> RefreshToken | None:
+        now = datetime.now(UTC)
+        return (
+            await self.session.execute(
+                select(RefreshToken).where(
+                    RefreshToken.token_hash == token_hash,
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.expires_at > now,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def revoke_refresh(self, token: RefreshToken) -> None:
+        token.revoked_at = datetime.now(UTC)
+        await self.session.flush()
+
+    async def revoke_all_refresh(self, user_id: UUID) -> None:
+        await self.session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self.session.flush()
 
     def add(self, obj: object) -> None:
         self.session.add(obj)

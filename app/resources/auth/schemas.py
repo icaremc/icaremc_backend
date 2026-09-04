@@ -42,11 +42,16 @@ class ResetBody(BaseModel):
 class TokenOut(BaseModel):
     ok: bool = True
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user_id: str
     role: str | None = None
     roles: list[str] | None = None
     admin_role: str | None = None
+
+
+class RefreshBody(BaseModel):
+    refresh_token: str
 
 
 class OkOut(BaseModel):

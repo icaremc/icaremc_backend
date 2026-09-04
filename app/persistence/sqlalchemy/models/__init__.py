@@ -40,6 +40,7 @@ from app.persistence.sqlalchemy.models.identity_booking import (
     DoctorService,
     Hospital,
     Profile,
+    RefreshToken,
     User,
 )
 from app.persistence.sqlalchemy.models.pregnancy_child import (
@@ -64,6 +65,7 @@ from app.persistence.sqlalchemy.models.pregnancy_child import (
 
 __all__ = [
     "User",
+    "RefreshToken",
     "Profile",
     "AdminUser",
     "DoctorCategory",

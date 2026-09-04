@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -31,3 +33,11 @@ def create_access_token(*, sub: UUID, role: str, extra: dict[str, Any] | None = 
 
 def decode_access_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, MySettings.JWT_SECRET, algorithms=[MySettings.JWT_ALGORITHM])
+
+
+def new_refresh_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_refresh_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()

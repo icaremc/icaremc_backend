@@ -13,6 +13,7 @@ from app.resources.auth.schemas import (
     PatientSignup,
     PhoneBody,
     PhoneTakenOut,
+    RefreshBody,
     ResetBody,
     TokenOut,
 )
@@ -63,6 +64,16 @@ async def password_otp(body: PhoneBody, svc: AuthServiceDep) -> OkOut:
 @router.post("/password/reset")
 async def password_reset(body: ResetBody, svc: AuthServiceDep) -> OkOut:
     return OkOut(**await svc.reset_password(phone=body.phone, otp=body.otp, new_password=body.new_password))
+
+
+@router.post("/refresh")
+async def refresh(body: RefreshBody, svc: AuthServiceDep) -> TokenOut:
+    return TokenOut(**await svc.refresh(body.refresh_token))
+
+
+@router.post("/logout")
+async def logout(body: RefreshBody, svc: AuthServiceDep) -> OkOut:
+    return OkOut(**await svc.logout(body.refresh_token))
 
 
 @router.get("/me")

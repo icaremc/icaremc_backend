@@ -21,6 +21,32 @@ def test_patient_signup_login_me(client, unique_phone):
     login = client.post("/api/v1/auth/patient/login", json={"phone": phone, "password": "secret12"})
     assert login.status_code == 200
     assert login.json()["access_token"]
+    assert login.json()["refresh_token"]
+
+
+def test_refresh_and_logout(client, unique_phone):
+    phone = unique_phone("95")
+    code = client.post("/api/v1/auth/patient/otp", json={"phone": phone}).json()["dev_code"]
+    signup = client.post(
+        "/api/v1/auth/patient/signup",
+        json={"phone": phone, "password": "secret12", "otp": code, "full_name": "Refresh"},
+    )
+    assert signup.status_code == 200
+    old_refresh = signup.json()["refresh_token"]
+
+    refreshed = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert refreshed.status_code == 200
+    body = refreshed.json()
+    assert body["access_token"]
+    assert body["refresh_token"] != old_refresh
+
+    reuse = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert reuse.status_code == 401
+
+    logout = client.post("/api/v1/auth/logout", json={"refresh_token": body["refresh_token"]})
+    assert logout.status_code == 200
+    after = client.post("/api/v1/auth/refresh", json={"refresh_token": body["refresh_token"]})
+    assert after.status_code == 401
 
 
 def test_patient_login_wrong_password(client, patient_auth):
