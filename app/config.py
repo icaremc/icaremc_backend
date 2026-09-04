@@ -46,4 +46,4 @@ class Settings(BaseSettings):
     FCM_PROJECT_ID: str = ""
 
 
-MySettings = Settings()
+MySettings = Settings()  # pyright: ignore[reportCallIssue]

@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from app.api.v1.schemas import RowOut
 from app.persistence.sqlalchemy.serialize import row_dict
 
@@ -16,5 +18,5 @@ def require_row(obj: object) -> RowOut:
     return row
 
 
-def to_rows(rows: list[object]) -> list[RowOut]:
+def to_rows(rows: Sequence[object]) -> list[RowOut]:
     return [require_row(r) for r in rows]

@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.resources.push.service import send_fcm
+from app.resources.push.fcm import send_fcm
 from app.persistence.sqlalchemy.connection import async_session_factory
 from app.persistence.sqlalchemy.models import (
     ChildFollowupReminderLog,
