@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_EXPIRE_DAYS: int = 30
 
-    SMS_API_BASE_URL: str = ""
-    SMS_API_KEY: str = ""
+    AFROMESSAGE_API_KEY: str = ""
+    AFRO_MESSAGE_SENDER_NAME: str = ""
+    AFRO_MESSAGE_IDENTIFIER_ID: str = ""
     SMS_OTP_DEV_CODE: str = "123456"
 
     CHAPA_SECRET_KEY: str = ""

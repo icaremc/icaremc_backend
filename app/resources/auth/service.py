@@ -78,7 +78,13 @@ class AuthService:
         role = "patient" if purpose == "signup" else "doctor"
         if await self.phone_taken(phone, role=role):
             return {"ok": False, "detail": "Phone already registered"}
-        code = await send_otp(self._repo.session, phone=phone, purpose=purpose)
+            
+        if purpose == "signup":
+            msg = "Your iCare verification code is: {code}"
+        else:
+            msg = "Your iCare Doctor signup code is: {code}"
+            
+        code = await send_otp(self._repo.session, phone=phone, purpose=purpose, message_template=msg)
         return {"ok": True, "dev_code": code or None}
 
     async def register_patient(
@@ -269,7 +275,8 @@ class AuthService:
 
     async def request_reset_otp(self, phone: str) -> dict:
         db = self._repo.session
-        code = await send_otp(db, phone=phone, purpose="reset")
+        msg = "Your iCare password reset code is: {code}"
+        code = await send_otp(db, phone=phone, purpose="reset", message_template=msg)
         return {"ok": True, "dev_code": code or None}
 
     async def reset_password(self, *, phone: str, otp: str, new_password: str) -> dict:

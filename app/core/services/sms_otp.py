@@ -2,12 +2,18 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import MySettings, EnvironmentOptions
 from app.persistence.sqlalchemy.models import OtpChallenge
+from app.core.services.sms import AfroMessageService
+
+sms_service = AfroMessageService(
+    api_key=MySettings.AFROMESSAGE_API_KEY,
+    sender_name=MySettings.AFRO_MESSAGE_SENDER_NAME,
+    identifier_id=MySettings.AFRO_MESSAGE_IDENTIFIER_ID,
+)
 
 
 def normalize_phone(phone: str) -> str:
@@ -21,7 +27,7 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
 
 
-async def send_otp(db: AsyncSession, *, phone: str, purpose: str) -> str:
+async def send_otp(db: AsyncSession, *, phone: str, purpose: str, message_template: str = "Your verification code is: {code}") -> str:
     phone = normalize_phone(phone)
     code = (
         MySettings.SMS_OTP_DEV_CODE
@@ -37,13 +43,8 @@ async def send_otp(db: AsyncSession, *, phone: str, purpose: str) -> str:
     db.add(challenge)
     await db.flush()
 
-    if MySettings.SMS_API_BASE_URL:
-        async with httpx.AsyncClient(timeout=20) as client:
-            await client.post(
-                f"{MySettings.SMS_API_BASE_URL.rstrip('/')}/sms/send-otp",
-                json={"phone": phone, "code": code},
-                headers={"Authorization": f"Bearer {MySettings.SMS_API_KEY}"} if MySettings.SMS_API_KEY else {},
-            )
+    message = message_template.format(code=code)
+    await sms_service.send_sms(to=phone, message=message)
     return code if MySettings.ENVIRONMENT == EnvironmentOptions.DEVELOPMENT else ""
 
 

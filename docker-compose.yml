@@ -56,7 +56,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     # Runs alembic migrations automatically
-    entrypoint: ["alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini", "upgrade", "head"]
+    entrypoint: ["alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini"]
 
 volumes:
   postgres_data:
