@@ -7,7 +7,7 @@ from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.pregnancies.repository import SqlAlchemyPregnancyRepository
-from app.resources.pregnancies.schemas import PregnancyIn, PregnancyLogIn
+from app.resources.pregnancies.schemas import PregnancyIn, PregnancyLogIn, PregnancyUpdate
 from app.resources.pregnancies.service import PregnancyService
 
 router = APIRouter(tags=["mother"])
@@ -28,6 +28,13 @@ async def list_pregnancies(user: RequirePatient, svc: PregnancyServiceDep) -> li
 @router.post("/pregnancies")
 async def create_pregnancy(body: PregnancyIn, user: RequirePatient, svc: PregnancyServiceDep) -> RowOut:
     return await svc.create_pregnancy(user.id, body)
+
+
+@router.patch("/pregnancies/{pregnancy_id}")
+async def update_pregnancy(
+    pregnancy_id: UUID, body: PregnancyUpdate, user: RequirePatient, svc: PregnancyServiceDep
+) -> RowOut:
+    return await svc.update_pregnancy(user.id, pregnancy_id, body)
 
 
 @router.post("/pregnancy-logs")

@@ -20,6 +20,21 @@ class PregnancyIn(BaseModel):
     embryo_age_days: int | None = None
 
 
+class PregnancyUpdate(BaseModel):
+    lmp_date: date | None = None
+    edd: date | None = None
+    status: str | None = None
+    pregnancy_number: int | None = None
+    is_first_pregnancy: bool | None = None
+    location: str | None = None
+    hospital: str | None = None
+    conditions: list[str] | None = None
+    pre_pregnancy_weight: Decimal | None = None
+    height_cm: Decimal | None = None
+    embryo_transfer_date: date | None = None
+    embryo_age_days: int | None = None
+
+
 class PregnancyLogIn(BaseModel):
     pregnancy_id: UUID
     week_number: int
