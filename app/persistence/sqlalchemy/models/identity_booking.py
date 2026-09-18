@@ -29,10 +29,14 @@ def _uuid() -> uuid.UUID:
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_phone_unique", "phone", unique=True, postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_users_email_unique", "email", unique=True, postgresql_where=text("deleted_at IS NULL")),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True)
+    phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)  # legacy primary; prefer roles[]
     roles: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list, server_default=text("'{}'"))
