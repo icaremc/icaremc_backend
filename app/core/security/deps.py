@@ -12,7 +12,7 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.persistence.sqlalchemy.models import AdminUser, User
 from app.resources.errors import forbidden, unauthorized
 
-bearer = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/admin/login", auto_error=False)
+bearer = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
 
 
 @dataclass

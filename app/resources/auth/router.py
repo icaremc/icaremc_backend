@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.security.deps import RequireAny
 from app.resources.auth.deps import AuthServiceDep
+from app.resources.errors import AppError
 from app.resources.auth.schemas import (
     AdminLoginBody,
     DoctorSignup,
@@ -55,6 +56,16 @@ async def doctor_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], sv
 @router.post("/admin/login")
 async def admin_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], svc: AuthServiceDep) -> TokenOut:
     return TokenOut(**await svc.admin_login(email=body.username, password=body.password))
+
+
+@router.post("/token", include_in_schema=False)
+async def swagger_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], svc: AuthServiceDep) -> TokenOut:
+    if "@" in body.username:
+        return TokenOut(**await svc.admin_login(email=body.username, password=body.password))
+    try:
+        return TokenOut(**await svc.login(phone=body.username, password=body.password, expected_role="doctor"))
+    except AppError:
+        return TokenOut(**await svc.login(phone=body.username, password=body.password, expected_role="patient"))
 
 
 @router.post("/password/otp")
