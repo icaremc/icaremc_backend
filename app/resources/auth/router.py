@@ -1,6 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.security.deps import RequireAny
 from app.resources.auth.deps import AuthServiceDep
@@ -42,18 +43,18 @@ async def doctor_signup(body: DoctorSignup, svc: AuthServiceDep) -> TokenOut:
 
 
 @router.post("/patient/login")
-async def patient_login(body: LoginBody, svc: AuthServiceDep) -> TokenOut:
-    return TokenOut(**await svc.login(phone=body.phone, password=body.password, expected_role="patient"))
+async def patient_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], svc: AuthServiceDep) -> TokenOut:
+    return TokenOut(**await svc.login(phone=body.username, password=body.password, expected_role="patient"))
 
 
 @router.post("/doctor/login")
-async def doctor_login(body: LoginBody, svc: AuthServiceDep) -> TokenOut:
-    return TokenOut(**await svc.login(phone=body.phone, password=body.password, expected_role="doctor"))
+async def doctor_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], svc: AuthServiceDep) -> TokenOut:
+    return TokenOut(**await svc.login(phone=body.username, password=body.password, expected_role="doctor"))
 
 
 @router.post("/admin/login")
-async def admin_login(body: AdminLoginBody, svc: AuthServiceDep) -> TokenOut:
-    return TokenOut(**await svc.admin_login(email=body.email, password=body.password))
+async def admin_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], svc: AuthServiceDep) -> TokenOut:
+    return TokenOut(**await svc.admin_login(email=body.username, password=body.password))
 
 
 @router.post("/password/otp")

@@ -240,6 +240,13 @@ class AdminService:
         await self._repo.session.flush()
         return require_row(row)
 
+    async def delete_hospital(self, hospital_id: UUID) -> None:
+        row = (await self._repo.session.execute(select(Hospital).where(Hospital.id == hospital_id))).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+
     async def categories(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(DoctorCategory))).scalars().all()))
 

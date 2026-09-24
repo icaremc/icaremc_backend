@@ -3,7 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, OAuth2PasswordBearer
 from sqlalchemy import select
 
 from app.core.security.tokens import decode_access_token
@@ -12,7 +12,7 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.persistence.sqlalchemy.models import AdminUser, User
 from app.resources.errors import forbidden, unauthorized
 
-bearer = HTTPBearer(auto_error=False)
+bearer = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/admin/login", auto_error=False)
 
 
 @dataclass
@@ -24,13 +24,13 @@ class AuthUser:
 
 
 async def get_current_user(
-    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    token: Annotated[str | None, Depends(bearer)],
     db: DbDep,
 ) -> AuthUser:
-    if creds is None or not creds.credentials:
+    if not token:
         raise unauthorized("Not authenticated")
     try:
-        payload = decode_access_token(creds.credentials)
+        payload = decode_access_token(token)
     except Exception as exc:
         raise unauthorized("Invalid token") from exc
     user_id = UUID(payload["sub"])
