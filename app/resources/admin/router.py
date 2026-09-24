@@ -126,6 +126,11 @@ async def patch_hospital(hospital_id: UUID, body: HospitalIn, user: RequireAdmin
     return await svc.patch_hospital(hospital_id, body)
 
 
+@router.delete("/hospitals/{hospital_id}", status_code=204)
+async def delete_hospital(hospital_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_hospital(hospital_id)
+
+
 @router.get("/doctor-categories")
 async def categories(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.categories()
