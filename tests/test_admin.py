@@ -162,6 +162,30 @@ def test_admin_create_admin_and_patch_hospital(client, admin_auth):
     assert patched.status_code == 200
     assert patched.json()["city"] == "Addis Ababa"
 
+    category = client.post(
+        "/api/v1/admin/doctor-categories",
+        headers=h,
+        json={
+            "name": "Cardiology",
+            "slug": "cardiology",
+            "care_focus": "both",
+            "translations": [
+                {"language_code": "en", "name": "Cardiology"},
+                {"language_code": "am", "name": "የልብ ህክምና"},
+            ],
+        },
+    )
+    assert category.status_code == 200, category.text
+    cid = category.json()["id"]
+    patched_cat = client.patch(
+        f"/api/v1/admin/doctor-categories/{cid}",
+        headers=h,
+        json={"name": "Heart Care", "slug": "heart-care", "sort_order": 3},
+    )
+    assert patched_cat.status_code == 200, patched_cat.text
+    assert patched_cat.json()["name"] == "Heart Care"
+    assert patched_cat.json()["sort_order"] == 3
+
 
 def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, patient_auth):
     from datetime import date, timedelta

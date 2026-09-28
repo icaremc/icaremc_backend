@@ -10,6 +10,7 @@ from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
     AdminCreateIn,
     CategoryIn,
+    CategoryPatchIn,
     DoctorVerifyIn,
     HospitalIn,
     LegalIn,
@@ -139,6 +140,18 @@ async def categories(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
 @router.post("/doctor-categories")
 async def create_category(body: CategoryIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.create_category(body)
+
+
+@router.patch("/doctor-categories/{category_id}")
+async def patch_category(
+    category_id: UUID, body: CategoryPatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_category(category_id, body)
+
+
+@router.delete("/doctor-categories/{category_id}")
+async def delete_category(category_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, bool]:
+    return await svc.delete_category(category_id)
 
 
 @router.get("/pregnancy-weeks")

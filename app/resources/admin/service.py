@@ -5,7 +5,6 @@ from sqlalchemy import func, select
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import AuthUser
-from app.core.services.auth_service import ensure_admin
 from app.persistence.sqlalchemy.models import (
     AdminActivityLog,
     AdminDocument,
@@ -18,6 +17,7 @@ from app.persistence.sqlalchemy.models import (
     ChildGrowthPeriod,
     DocumentDelivery,
     DoctorCategory,
+    DoctorCategoryTranslation,
     DoctorPayoutRequest,
     DoctorProfile,
     DoctorWallet,
@@ -34,6 +34,8 @@ from app.resources.admin.repository import AdminRepository
 from app.resources.admin.schemas import (
     AdminCreateIn,
     CategoryIn,
+    CategoryPatchIn,
+    CategoryTranslationIn,
     DoctorVerifyIn,
     HospitalIn,
     LegalIn,
@@ -44,12 +46,17 @@ from app.resources.admin.schemas import (
     WeekTranslationIn,
 )
 from app.resources.errors import forbidden, not_found
+from app.resources.auth.repository import SqlAlchemyAuthRepository
+from app.resources.auth.service import AuthService
 from app.resources.serialize import require_row, to_rows
 
 
 class AdminService:
     def __init__(self, repo: AdminRepository) -> None:
         self._repo = repo
+
+    def _auth(self) -> AuthService:
+        return AuthService(SqlAlchemyAuthRepository(self._repo.session))
 
     async def _log(self, admin: AuthUser, event_type: str, event_label: str, **kwargs: object) -> None:
         self._repo.session.add(
@@ -217,8 +224,8 @@ class AdminService:
     async def create_admin(self, body: AdminCreateIn, actor: AuthUser) -> dict[str, str]:
         if actor.admin_role != "super_admin":
             raise forbidden("super_admin required")
-        admin_id = await ensure_admin(
-            self._repo.session, email=body.email, password=body.password, full_name=body.full_name, admin_role=body.admin_role
+        admin_id = await self._auth().ensure_admin(
+            email=body.email, password=body.password, full_name=body.full_name, admin_role=body.admin_role
         )
         return {"id": str(admin_id)}
 
@@ -247,14 +254,83 @@ class AdminService:
         await self._repo.session.delete(row)
         await self._repo.session.flush()
 
+    async def _category_out(self, row: DoctorCategory) -> RowOut:
+        translations = (
+            await self._repo.session.execute(
+                select(DoctorCategoryTranslation).where(DoctorCategoryTranslation.category_id == row.id)
+            )
+        ).scalars().all()
+        data = require_row(row).model_dump()
+        data["doctor_category_translations"] = [
+            {
+                "id": str(t.id),
+                "category_id": str(t.category_id),
+                "language_code": t.language_code,
+                "name": t.name,
+            }
+            for t in translations
+        ]
+        return RowOut.model_validate(data)
+
+    async def _upsert_category_translations(
+        self, category_id: UUID, translations: list[CategoryTranslationIn]
+    ) -> None:
+        for item in translations:
+            code = item.language_code.strip().lower()
+            name = item.name.strip()
+            if not code or not name:
+                continue
+            existing = (
+                await self._repo.session.execute(
+                    select(DoctorCategoryTranslation).where(
+                        DoctorCategoryTranslation.category_id == category_id,
+                        DoctorCategoryTranslation.language_code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                self._repo.session.add(
+                    DoctorCategoryTranslation(category_id=category_id, language_code=code, name=name)
+                )
+            else:
+                existing.name = name
+        await self._repo.session.flush()
+
     async def categories(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(DoctorCategory))).scalars().all()))
+        rows = list((await self._repo.session.execute(select(DoctorCategory))).scalars().all())
+        return [await self._category_out(row) for row in rows]
 
     async def create_category(self, body: CategoryIn) -> RowOut:
-        row = DoctorCategory(**body.model_dump())
+        payload = body.model_dump(exclude={"translations"})
+        row = DoctorCategory(**payload)
         self._repo.session.add(row)
         await self._repo.session.flush()
-        return require_row(row)
+        if body.translations:
+            await self._upsert_category_translations(row.id, body.translations)
+        return await self._category_out(row)
+
+    async def patch_category(self, category_id: UUID, body: CategoryPatchIn) -> RowOut:
+        row = (
+            await self._repo.session.execute(select(DoctorCategory).where(DoctorCategory.id == category_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True, exclude={"translations"}).items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        if body.translations is not None:
+            await self._upsert_category_translations(category_id, body.translations)
+        return await self._category_out(row)
+
+    async def delete_category(self, category_id: UUID) -> dict[str, bool]:
+        row = (
+            await self._repo.session.execute(select(DoctorCategory).where(DoctorCategory.id == category_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+        return {"ok": True}
 
     async def pregnancy_weeks(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(PregnancyWeek))).scalars().all()))
@@ -322,7 +398,7 @@ class AdminService:
         count = (await self._repo.session.execute(select(func.count()).select_from(AdminUser))).scalar_one()
         if count > 0:
             raise forbidden("Admins already exist")
-        admin_id = await ensure_admin(
-            self._repo.session, email=body.email, password=body.password, full_name=body.full_name, admin_role="super_admin"
+        admin_id = await self._auth().ensure_admin(
+            email=body.email, password=body.password, full_name=body.full_name, admin_role="super_admin"
         )
         return {"id": str(admin_id)}

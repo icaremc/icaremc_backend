@@ -43,6 +43,11 @@ class HospitalIn(BaseModel):
     sort_order: int = 0
 
 
+class CategoryTranslationIn(BaseModel):
+    language_code: str
+    name: str
+
+
 class CategoryIn(BaseModel):
     name: str
     slug: str
@@ -50,6 +55,17 @@ class CategoryIn(BaseModel):
     sort_order: int = 1
     image_url: str | None = None
     care_focus: str = "both"
+    translations: list[CategoryTranslationIn] | None = None
+
+
+class CategoryPatchIn(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+    image_url: str | None = None
+    care_focus: str | None = None
+    translations: list[CategoryTranslationIn] | None = None
 
 
 class WeekIn(BaseModel):
