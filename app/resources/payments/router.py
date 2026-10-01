@@ -28,7 +28,8 @@ async def initiate(body: InitiateIn, user: RequirePatient, svc: PaymentServiceDe
 async def chapa_webhook(
     request: Request,
     svc: PaymentServiceDep,
-    chapa_signature: str | None = Header(default=None, alias="Chapa-Signature"),
 ) -> PaymentWebhookOut:
+    sig = request.headers.get("x-chapa-signature") or request.headers.get("chapa-signature")
+    raw_body = await request.body()
     body = await request.json()
-    return await svc.handle_webhook(body, chapa_signature)
+    return await svc.handle_webhook(raw_body, body, sig)

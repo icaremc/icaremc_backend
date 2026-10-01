@@ -14,3 +14,4 @@ class InitiateIn(BaseModel):
     email: str = "patient@icaremc.app"
     first_name: str = "Patient"
     last_name: str = "User"
+    return_url: str | None = None

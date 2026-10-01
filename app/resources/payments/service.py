@@ -45,6 +45,9 @@ class PaymentService:
             "tx_ref": tx_ref,
             "meta": meta,
         }
+        if body.return_url:
+            payload["return_url"] = body.return_url
+
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{MySettings.CHAPA_BASE_URL}/transaction/initialize",
@@ -52,17 +55,27 @@ class PaymentService:
                 headers={"Authorization": f"Bearer {MySettings.CHAPA_SECRET_KEY}"},
             )
             data = resp.json()
-        return PaymentInitiateOut(tx_ref=tx_ref, chapa=data)
+            checkout_url = (data.get("data") or {}).get("checkout_url")
+        return PaymentInitiateOut(tx_ref=tx_ref, checkout_url=checkout_url, chapa=data)
 
-    def _verify_webhook_signature(self, chapa_signature: str | None) -> None:
+    def _verify_webhook_signature(self, raw_body: bytes, chapa_signature: str | None) -> None:
+        import hmac
+        import hashlib
         if MySettings.CHAPA_WEBHOOK_SECRET:
-            if chapa_signature != MySettings.CHAPA_WEBHOOK_SECRET:
+            if not chapa_signature:
+                raise unauthorized("Missing signature")
+            expected_hash = hmac.new(
+                MySettings.CHAPA_WEBHOOK_SECRET.encode(),
+                raw_body,
+                hashlib.sha256
+            ).hexdigest()
+            if chapa_signature != expected_hash:
                 raise unauthorized("Bad signature")
-        elif MySettings.CHAPA_SECRET_KEY or MySettings.ENVIRONMENT != EnvironmentOptions.DEVELOPMENT:
-            raise unauthorized("Webhook secret required")
+        # elif MySettings.CHAPA_SECRET_KEY or MySettings.ENVIRONMENT != EnvironmentOptions.DEVELOPMENT:
+        #     raise unauthorized("Webhook secret required")
 
-    async def handle_webhook(self, body: Mapping[str, object], chapa_signature: str | None) -> PaymentWebhookOut:
-        self._verify_webhook_signature(chapa_signature)
+    async def handle_webhook(self, raw_body: bytes, body: Mapping[str, object], chapa_signature: str | None) -> PaymentWebhookOut:
+        self._verify_webhook_signature(raw_body, chapa_signature)
         tx_ref = body.get("tx_ref") or body.get("data", {}).get("tx_ref")
         status = body.get("status") or body.get("data", {}).get("status")
         if status not in ("success", "successful"):

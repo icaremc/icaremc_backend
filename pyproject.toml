@@ -17,6 +17,7 @@ dependencies = [
     "httpx>=0.28.1",
     "email-validator>=2.3.0",
     "greenlet>=3.5.5",
+    "supabase>=2.31.0",
 ]
 
 [dependency-groups]
