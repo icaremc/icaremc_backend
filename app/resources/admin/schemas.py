@@ -93,3 +93,25 @@ class LegalIn(BaseModel):
     locale: str = "en"
     title: str
     sections: list[object] = Field(default_factory=list)
+
+
+class DailyTipTranslationIn(BaseModel):
+    language_code: str
+    title: str
+    content: str
+
+
+class DailyTipIn(BaseModel):
+    week_number: int
+    day_number: int | None = None
+    category: str | None = None
+    is_active: bool = True
+    translations: list[DailyTipTranslationIn] | None = None
+
+
+class DailyTipPatchIn(BaseModel):
+    week_number: int | None = None
+    day_number: int | None = None
+    category: str | None = None
+    is_active: bool | None = None
+    translations: list[DailyTipTranslationIn] | None = None
