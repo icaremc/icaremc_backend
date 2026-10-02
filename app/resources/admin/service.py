@@ -20,6 +20,8 @@ from app.persistence.sqlalchemy.models import (
     DoctorCategoryTranslation,
     DoctorPayoutRequest,
     DoctorProfile,
+    DoctorReferral,
+    DoctorReferralCommission,
     DoctorService,
     DoctorWallet,
     Hospital,
@@ -402,6 +404,121 @@ class AdminService:
             )
         ).scalars().all()
         return to_rows(list(rows))
+
+
+    async def list_referrals(self, limit: int = 200) -> list[dict[str, object]]:
+        refs = list(
+            (
+                await self._repo.session.execute(
+                    select(DoctorReferral).order_by(DoctorReferral.created_at.desc()).limit(limit)
+                )
+            ).scalars().all()
+        )
+        if not refs:
+            return []
+
+        patient_ids = {r.patient_id for r in refs}
+        doctor_ids = {r.doctor_id for r in refs}
+        profiles = {
+            p.id: p
+            for p in (
+                await self._repo.session.execute(select(Profile).where(Profile.id.in_(patient_ids)))
+            ).scalars().all()
+        }
+        doctors = {
+            d.id: d
+            for d in (
+                await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id.in_(doctor_ids)))
+            ).scalars().all()
+        }
+        paid = {
+            row.patient_id
+            for row in (
+                await self._repo.session.execute(
+                    select(AppSubscription).where(
+                        AppSubscription.patient_id.in_(patient_ids),
+                        AppSubscription.amount_paid > 0,
+                    )
+                )
+            ).scalars().all()
+        }
+
+        out: list[dict[str, object]] = []
+        for ref in refs:
+            profile = profiles.get(ref.patient_id)
+            doctor = doctors.get(ref.doctor_id)
+            doctor_name = None
+            if doctor is not None:
+                parts = [p for p in [doctor.first_name, doctor.last_name] if p and str(p).strip()]
+                doctor_name = " ".join(parts) if parts else None
+            out.append(
+                {
+                    "id": str(ref.id),
+                    "patient_id": str(ref.patient_id),
+                    "doctor_id": str(ref.doctor_id),
+                    "referral_code": ref.referral_code,
+                    "created_at": ref.created_at.isoformat() if ref.created_at else None,
+                    "patient_name": getattr(profile, "full_name", None) if profile else None,
+                    "patient_phone": getattr(profile, "phone", None) if profile else None,
+                    "doctor_name": doctor_name,
+                    "is_subscribed": ref.patient_id in paid,
+                }
+            )
+        return out
+
+    async def list_referral_commissions(self, limit: int = 200) -> list[dict[str, object]]:
+        rows = list(
+            (
+                await self._repo.session.execute(
+                    select(DoctorReferralCommission)
+                    .order_by(DoctorReferralCommission.created_at.desc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+        )
+        if not rows:
+            return []
+
+        patient_ids = {r.patient_id for r in rows}
+        doctor_ids = {r.doctor_id for r in rows}
+        profiles = {
+            p.id: p
+            for p in (
+                await self._repo.session.execute(select(Profile).where(Profile.id.in_(patient_ids)))
+            ).scalars().all()
+        }
+        doctors = {
+            d.id: d
+            for d in (
+                await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id.in_(doctor_ids)))
+            ).scalars().all()
+        }
+
+        out: list[dict[str, object]] = []
+        for row in rows:
+            profile = profiles.get(row.patient_id)
+            doctor = doctors.get(row.doctor_id)
+            doctor_name = None
+            if doctor is not None:
+                parts = [p for p in [doctor.first_name, doctor.last_name] if p and str(p).strip()]
+                doctor_name = " ".join(parts) if parts else None
+            out.append(
+                {
+                    "id": str(row.id),
+                    "referral_id": str(row.referral_id),
+                    "doctor_id": str(row.doctor_id),
+                    "patient_id": str(row.patient_id),
+                    "payment_id": str(row.payment_id) if row.payment_id else None,
+                    "subscription_amount": float(row.subscription_amount),
+                    "commission_percent": float(row.commission_percent),
+                    "commission_amount": float(row.commission_amount),
+                    "currency": row.currency,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "patient_name": getattr(profile, "full_name", None) if profile else None,
+                    "doctor_name": doctor_name,
+                }
+            )
+        return out
 
     async def bootstrap_super_admin(self, body: AdminCreateIn) -> dict[str, str]:
         count = (await self._repo.session.execute(select(func.count()).select_from(AdminUser))).scalar_one()
