@@ -277,3 +277,116 @@ def test_admin_get_child_not_found(client, admin_auth):
     missing = "00000000-0000-4000-8000-000000000099"
     res = client.get(f"/api/v1/admin/children/{missing}", headers=h)
     assert res.status_code == 404
+
+
+def test_admin_pregnancy_week_patch_delete(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    week = client.post(
+        "/api/v1/admin/pregnancy-weeks",
+        headers=h,
+        json={"week_number": 20, "trimester": 2, "is_published": False},
+    )
+    assert week.status_code == 200, week.text
+    week_id = week.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}",
+        headers=h,
+        json={"is_published": True, "image_note": "mid pregnancy"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["is_published"] is True
+
+    tr = client.post(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}/translations",
+        headers=h,
+        json={"language_code": "en", "title": "Week 20"},
+    )
+    assert tr.status_code == 200
+    tr2 = client.post(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}/translations",
+        headers=h,
+        json={"language_code": "en", "title": "Week 20 updated", "subtitle": "Halfway"},
+    )
+    assert tr2.status_code == 200
+    assert tr2.json()["title"] == "Week 20 updated"
+
+    deleted = client.delete(f"/api/v1/admin/pregnancy-weeks/{week_id}", headers=h)
+    assert deleted.status_code == 204
+
+
+def test_admin_child_growth_period_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/child-growth-periods",
+        headers=h,
+        json={
+            "age_months": 6,
+            "age_label": "6 months",
+            "age_group": "infant",
+            "is_published": True,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Six months",
+                    "milestones": [{"key": "sit"}],
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    period_id = created.json()["id"]
+    assert len(created.json()["child_growth_period_translations"]) == 1
+
+    got = client.get(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert got.status_code == 200
+    assert got.json()["age_months"] == 6
+
+    patched = client.patch(
+        f"/api/v1/admin/child-growth-periods/{period_id}",
+        headers=h,
+        json={
+            "age_label": "Half year",
+            "translations": [
+                {"language_code": "en", "title": "Six months", "subtitle": "Sitting"},
+                {"language_code": "am", "title": "ስድስት ወር"},
+            ],
+        },
+    )
+    assert patched.status_code == 200
+    assert patched.json()["age_label"] == "Half year"
+    assert len(patched.json()["child_growth_period_translations"]) == 2
+
+    deleted = client.delete(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert missing.status_code == 404
+
+
+def test_admin_followup_template_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/followup-templates",
+        headers=h,
+        json={
+            "code": "visit_test_6mo",
+            "label": "6 month visit",
+            "offset_months": 6,
+            "is_published": True,
+            "label_translations": {"en": {"name": "6 month visit"}},
+        },
+    )
+    assert created.status_code == 200, created.text
+    template_id = created.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/followup-templates/{template_id}",
+        headers=h,
+        json={"label": "6-month check-up", "sort_order": 10},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["label"] == "6-month check-up"
+    assert patched.json()["sort_order"] == 10
+
+    deleted = client.delete(f"/api/v1/admin/followup-templates/{template_id}", headers=h)
+    assert deleted.status_code == 204
