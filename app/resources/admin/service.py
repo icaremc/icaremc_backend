@@ -37,6 +37,7 @@ from app.resources.admin.schemas import (
     CategoryIn,
     CategoryPatchIn,
     CategoryTranslationIn,
+    DoctorBookingIn,
     DoctorVerifyIn,
     HospitalIn,
     LegalIn,
@@ -46,7 +47,7 @@ from app.resources.admin.schemas import (
     WeekIn,
     WeekTranslationIn,
 )
-from app.resources.errors import forbidden, not_found
+from app.resources.errors import bad_request, forbidden, not_found
 from app.resources.auth.repository import SqlAlchemyAuthRepository
 from app.resources.auth.service import AuthService
 from app.resources.serialize import require_row, to_rows
@@ -116,6 +117,63 @@ class AdminService:
             )
         ).scalars().all()
         return to_rows(list(rows))
+
+    async def replace_doctor_booking(
+        self, doctor_id: UUID, body: DoctorBookingIn, admin: AuthUser
+    ) -> dict[str, object]:
+        doctor = (
+            await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))
+        ).scalar_one_or_none()
+        if doctor is None:
+            raise not_found()
+
+        if body.currency:
+            # ponytail: doctor_profiles may not have currency; ignore if attr missing
+            if hasattr(doctor, "currency"):
+                doctor.currency = body.currency
+
+        if body.services is not None:
+            existing = list(
+                (
+                    await self._repo.session.execute(
+                        select(DoctorService).where(DoctorService.doctor_id == doctor_id)
+                    )
+                ).scalars().all()
+            )
+            kept = {str(s.id) for s in body.services if s.id is not None}
+            for row in existing:
+                if str(row.id) not in kept:
+                    await self._repo.session.delete(row)
+
+            for index, service in enumerate(body.services):
+                name = service.name.strip()
+                if not name:
+                    continue
+                if service.id is not None:
+                    row = next((r for r in existing if r.id == service.id), None)
+                    if row is None:
+                        raise bad_request(f"Unknown service id {service.id}")
+                    row.name = name
+                    row.description = service.description
+                    row.price = service.price
+                    row.is_active = service.is_active
+                    row.sort_order = index
+                else:
+                    self._repo.session.add(
+                        DoctorService(
+                            doctor_id=doctor_id,
+                            name=name,
+                            description=service.description,
+                            price=service.price,
+                            is_active=service.is_active,
+                            sort_order=index,
+                        )
+                    )
+
+        await self._log(admin, "doctor.booking", "Doctor booking services updated", doctor_id=str(doctor_id))
+        await self._repo.session.flush()
+        services = await self.list_doctor_services(doctor_id)
+        return {"doctor": require_row(doctor), "services": services}
 
     async def verify_doctor(self, doctor_id: UUID, body: DoctorVerifyIn, admin: AuthUser) -> RowOut:
         row = (await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))).scalar_one_or_none()
