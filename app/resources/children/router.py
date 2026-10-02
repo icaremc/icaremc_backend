@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from uuid import UUID
 
-from app.api.v1.schemas import RowOut
+from app.api.v1.schemas import OkOut, RowOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.children.repository import SqlAlchemyChildrenRepository
@@ -33,6 +33,12 @@ async def create_child(body: ChildIn, user: RequirePatient, svc: ChildrenService
 @router.patch("/children/{child_id}")
 async def patch_child(child_id: UUID, body: ChildIn, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
     return await svc.patch_child(child_id, user.id, body)
+
+
+@router.delete("/children/{child_id}")
+async def delete_child(child_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> OkOut:
+    await svc.delete_child(child_id, user.id)
+    return OkOut()
 
 
 @router.post("/child-measurements")

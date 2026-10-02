@@ -22,6 +22,7 @@ class ChildrenRepository(Protocol):
     async def get_vaccine(self, user_id: UUID, child_local_id: str, vaccine_key: str) -> ChildVaccineRecord | None: ...
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[ChildFollowupVisit]: ...
     def add(self, obj: object) -> None: ...
+    def delete(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
 
 
@@ -106,6 +107,9 @@ class SqlAlchemyChildrenRepository:
 
     def add(self, obj: object) -> None:
         self._db.add(obj)
+
+    def delete(self, obj: object) -> None:
+        self._db.delete(obj)
 
     async def flush(self) -> None:
         await self._db.flush()

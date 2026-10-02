@@ -35,6 +35,13 @@ class ChildrenService:
         await self._repo.flush()
         return require_row(row)
 
+    async def delete_child(self, child_id: UUID, user_id: UUID) -> None:
+        row = await self._repo.get_child(child_id, user_id)
+        if row is None:
+            raise not_found()
+        self._repo.delete(row)
+        await self._repo.flush()
+
     async def add_measurement(self, user_id: UUID, body: MeasurementIn) -> RowOut:
         data = body.model_dump()
         if data.get("measured_on") is None:
