@@ -141,8 +141,9 @@ class AdminService:
         return {"appointment": require_row(row), "conversation": None, "messages": []}
 
     async def list_children(self, limit: int = 200) -> list[RowOut]:
+        cap = max(1, min(limit, 500))
         rows = (
-            await self._repo.session.execute(select(Child).order_by(Child.created_at.desc()).limit(limit))
+            await self._repo.session.execute(select(Child).order_by(Child.created_at.desc()).limit(cap))
         ).scalars().all()
         return to_rows(list(rows))
 
