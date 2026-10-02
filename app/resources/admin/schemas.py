@@ -93,3 +93,21 @@ class LegalIn(BaseModel):
     locale: str = "en"
     title: str
     sections: list[object] = Field(default_factory=list)
+
+
+class AppointmentStatusIn(BaseModel):
+    status: str
+
+
+class AdminPatchIn(BaseModel):
+    is_active: bool | None = None
+    admin_role: str | None = None
+    full_name: str | None = None
+
+
+class DocumentIn(BaseModel):
+    title: str
+    category: str = "other"
+    storage_path: str
+    file_name: str
+    mime_type: str = "application/pdf"
