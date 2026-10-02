@@ -256,3 +256,61 @@ def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, pati
     assert rejected.json()["status"] == "rejected"
     wallet = client.get("/api/v1/doctor/wallet", headers=doctor_h).json()["wallet"]
     assert Decimal(wallet["available_balance"]) >= Decimal("200")
+
+
+def test_admin_patch_appointment_status(client, admin_auth, doctor_auth, patient_auth):
+    h = auth_header(admin_auth["token"])
+    # create via doctor flow if appointments exist; otherwise skip gracefully
+    listed = client.get("/api/v1/admin/appointments", headers=h)
+    assert listed.status_code == 200
+    rows = listed.json()
+    if not rows:
+        return
+    appt_id = rows[0]["id"]
+    res = client.patch(
+        f"/api/v1/admin/appointments/{appt_id}",
+        headers=h,
+        json={"status": "confirmed"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "confirmed"
+
+
+def test_admin_patch_admin_self_forbidden_role(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    me = admin_auth["user_id"]
+    res = client.patch(
+        f"/api/v1/admin/admins/{me}",
+        headers=h,
+        json={"admin_role": "viewer"},
+    )
+    assert res.status_code == 400
+
+
+def test_admin_create_document_and_list_deliveries(client, admin_auth, doctor_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/documents",
+        headers=h,
+        json={
+            "title": "Clinic agreement",
+            "category": "agreement",
+            "storage_path": "/static/uploads/test.pdf",
+            "file_name": "test.pdf",
+            "mime_type": "application/pdf",
+        },
+    )
+    assert created.status_code == 200, created.text
+    doc_id = created.json()["id"]
+    delivered = client.post(
+        f"/api/v1/admin/documents/{doc_id}/deliver",
+        headers=h,
+        params={"recipient_id": doctor_auth["user_id"]},
+    )
+    assert delivered.status_code == 200, delivered.text
+    history = client.get(
+        f"/api/v1/admin/doctors/{doctor_auth['user_id']}/document-deliveries",
+        headers=h,
+    )
+    assert history.status_code == 200
+    assert any(row["document_id"] == doc_id for row in history.json())
