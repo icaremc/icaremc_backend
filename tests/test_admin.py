@@ -290,3 +290,23 @@ def test_admin_doctor_referral_stats(client, admin_auth, doctor_auth):
     assert "referral_code" in body
     assert "referred_count" in body
     assert "total_commission" in body
+
+def test_admin_get_appointment_not_found(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    missing = "00000000-0000-4000-8000-000000000099"
+    res = client.get(f"/api/v1/admin/appointments/{missing}", headers=h)
+    assert res.status_code == 404
+
+
+def test_admin_list_children(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    res = client.get("/api/v1/admin/children", headers=h)
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)
+
+
+def test_admin_get_child_not_found(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    missing = "00000000-0000-4000-8000-000000000099"
+    res = client.get(f"/api/v1/admin/children/{missing}", headers=h)
+    assert res.status_code == 404
