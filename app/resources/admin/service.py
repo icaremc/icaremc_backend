@@ -132,6 +132,26 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
+    async def get_appointment(self, appointment_id: UUID) -> dict[str, object]:
+        row = (
+            await self._repo.session.execute(select(Appointment).where(Appointment.id == appointment_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        return {"appointment": require_row(row), "conversation": None, "messages": []}
+
+    async def list_children(self, limit: int = 200) -> list[RowOut]:
+        rows = (
+            await self._repo.session.execute(select(Child).order_by(Child.created_at.desc()).limit(limit))
+        ).scalars().all()
+        return to_rows(list(rows))
+
+    async def get_child(self, child_id: UUID) -> RowOut:
+        row = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        return require_row(row)
+
     async def get_setting(self, setting_id: str) -> dict[str, object]:
         row = (await self._repo.session.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
         return {"id": setting_id, "data": row.data if row else {}}
