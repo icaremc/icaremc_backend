@@ -15,6 +15,7 @@ from app.persistence.sqlalchemy.models import (
     Child,
     ChildFollowupVisitTemplate,
     ChildGrowthPeriod,
+    ChildGrowthPeriodTranslation,
     DocumentDelivery,
     DoctorCategory,
     DoctorCategoryTranslation,
@@ -38,12 +39,18 @@ from app.resources.admin.schemas import (
     CategoryPatchIn,
     CategoryTranslationIn,
     DoctorVerifyIn,
+    FollowupTemplateIn,
+    FollowupTemplatePatchIn,
+    GrowthPeriodIn,
+    GrowthPeriodPatchIn,
+    GrowthPeriodTranslationIn,
     HospitalIn,
     LegalIn,
     PayoutActionIn,
     SettingIn,
     SubscriptionGrantIn,
     WeekIn,
+    WeekPatchIn,
     WeekTranslationIn,
 )
 from app.resources.errors import forbidden, not_found
@@ -371,17 +378,218 @@ class AdminService:
         await self._repo.session.flush()
         return require_row(row)
 
+    async def patch_week(self, week_id: UUID, body: WeekPatchIn) -> RowOut:
+        row = (
+            await self._repo.session.execute(select(PregnancyWeek).where(PregnancyWeek.id == week_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        return require_row(row)
+
+    async def delete_week(self, week_id: UUID) -> None:
+        row = (
+            await self._repo.session.execute(select(PregnancyWeek).where(PregnancyWeek.id == week_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+
     async def week_translation(self, week_id: UUID, body: WeekTranslationIn) -> RowOut:
-        row = PregnancyWeekTranslation(pregnancy_week_id=week_id, **body.model_dump())
+        week = (
+            await self._repo.session.execute(select(PregnancyWeek).where(PregnancyWeek.id == week_id))
+        ).scalar_one_or_none()
+        if week is None:
+            raise not_found()
+        code = body.language_code.strip().lower()
+        existing = (
+            await self._repo.session.execute(
+                select(PregnancyWeekTranslation).where(
+                    PregnancyWeekTranslation.pregnancy_week_id == week_id,
+                    PregnancyWeekTranslation.language_code == code,
+                )
+            )
+        ).scalar_one_or_none()
+        payload = body.model_dump()
+        payload["language_code"] = code
+        if existing is None:
+            row = PregnancyWeekTranslation(pregnancy_week_id=week_id, **payload)
+            self._repo.session.add(row)
+        else:
+            for key, value in payload.items():
+                setattr(existing, key, value)
+            row = existing
+        await self._repo.session.flush()
+        return require_row(row)
+
+    async def _growth_period_out(self, row: ChildGrowthPeriod) -> RowOut:
+        translations = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriodTranslation).where(
+                    ChildGrowthPeriodTranslation.period_id == row.id
+                )
+            )
+        ).scalars().all()
+        data = require_row(row).model_dump()
+        data["child_growth_period_translations"] = [
+            {
+                "id": str(t.id),
+                "period_id": str(t.period_id),
+                "language_code": t.language_code,
+                "title": t.title,
+                "subtitle": t.subtitle,
+                "growth": t.growth,
+                "vaccines": t.vaccines,
+                "milestones": t.milestones,
+                "red_flags": t.red_flags,
+                "nutrition": t.nutrition,
+                "visit_reminders": t.visit_reminders,
+            }
+            for t in translations
+        ]
+        return RowOut.model_validate(data)
+
+    async def _upsert_growth_translations(
+        self, period_id: UUID, translations: list[GrowthPeriodTranslationIn]
+    ) -> None:
+        for item in translations:
+            code = item.language_code.strip().lower()
+            title = item.title.strip()
+            if not code or not title:
+                continue
+            payload = item.model_dump()
+            payload["language_code"] = code
+            payload["title"] = title
+            existing = (
+                await self._repo.session.execute(
+                    select(ChildGrowthPeriodTranslation).where(
+                        ChildGrowthPeriodTranslation.period_id == period_id,
+                        ChildGrowthPeriodTranslation.language_code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                self._repo.session.add(
+                    ChildGrowthPeriodTranslation(period_id=period_id, **payload)
+                )
+            else:
+                for key, value in payload.items():
+                    setattr(existing, key, value)
+        await self._repo.session.flush()
+
+    async def growth_periods(self) -> list[RowOut]:
+        rows = list((await self._repo.session.execute(select(ChildGrowthPeriod))).scalars().all())
+        return [await self._growth_period_out(row) for row in rows]
+
+    async def get_growth_period(self, period_id: UUID) -> RowOut:
+        row = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriod).where(ChildGrowthPeriod.id == period_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        return await self._growth_period_out(row)
+
+    async def create_growth_period(self, body: GrowthPeriodIn) -> RowOut:
+        payload = body.model_dump(exclude={"translations"})
+        row = ChildGrowthPeriod(**payload)
+        self._repo.session.add(row)
+        await self._repo.session.flush()
+        if body.translations:
+            await self._upsert_growth_translations(row.id, body.translations)
+        return await self._growth_period_out(row)
+
+    async def patch_growth_period(self, period_id: UUID, body: GrowthPeriodPatchIn) -> RowOut:
+        row = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriod).where(ChildGrowthPeriod.id == period_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True, exclude={"translations"}).items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        if body.translations is not None:
+            await self._upsert_growth_translations(period_id, body.translations)
+        return await self._growth_period_out(row)
+
+    async def delete_growth_period(self, period_id: UUID) -> None:
+        row = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriod).where(ChildGrowthPeriod.id == period_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+
+    async def growth_period_translation(
+        self, period_id: UUID, body: GrowthPeriodTranslationIn
+    ) -> RowOut:
+        period = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriod).where(ChildGrowthPeriod.id == period_id)
+            )
+        ).scalar_one_or_none()
+        if period is None:
+            raise not_found()
+        await self._upsert_growth_translations(period_id, [body])
+        existing = (
+            await self._repo.session.execute(
+                select(ChildGrowthPeriodTranslation).where(
+                    ChildGrowthPeriodTranslation.period_id == period_id,
+                    ChildGrowthPeriodTranslation.language_code == body.language_code.strip().lower(),
+                )
+            )
+        ).scalar_one()
+        return require_row(existing)
+
+    async def followup_templates(self) -> list[RowOut]:
+        return to_rows(
+            list((await self._repo.session.execute(select(ChildFollowupVisitTemplate))).scalars().all())
+        )
+
+    async def create_followup_template(self, body: FollowupTemplateIn) -> RowOut:
+        row = ChildFollowupVisitTemplate(**body.model_dump())
         self._repo.session.add(row)
         await self._repo.session.flush()
         return require_row(row)
 
-    async def growth_periods(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(ChildGrowthPeriod))).scalars().all()))
+    async def patch_followup_template(
+        self, template_id: UUID, body: FollowupTemplatePatchIn
+    ) -> RowOut:
+        row = (
+            await self._repo.session.execute(
+                select(ChildFollowupVisitTemplate).where(
+                    ChildFollowupVisitTemplate.id == template_id
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        return require_row(row)
 
-    async def followup_templates(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(ChildFollowupVisitTemplate))).scalars().all()))
+    async def delete_followup_template(self, template_id: UUID) -> None:
+        row = (
+            await self._repo.session.execute(
+                select(ChildFollowupVisitTemplate).where(
+                    ChildFollowupVisitTemplate.id == template_id
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
 
     async def legal_docs(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(LegalDocument))).scalars().all()))
