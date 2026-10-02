@@ -93,3 +93,16 @@ class LegalIn(BaseModel):
     locale: str = "en"
     title: str
     sections: list[object] = Field(default_factory=list)
+
+
+class DoctorServiceItemIn(BaseModel):
+    id: UUID | None = None
+    name: str
+    description: str | None = None
+    price: Decimal
+    is_active: bool = True
+
+
+class DoctorBookingIn(BaseModel):
+    currency: str | None = None
+    services: list[DoctorServiceItemIn] | None = None
