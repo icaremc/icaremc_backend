@@ -214,6 +214,20 @@ async def platform_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100)
     return await svc.platform_activity(limit)
 
 
+
+
+@router.get("/referrals")
+async def list_referrals(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[dict[str, object]]:
+    return await svc.list_referrals(limit)
+
+
+@router.get("/referral-commissions")
+async def list_referral_commissions(
+    user: RequireAdmin, svc: AdminDep, limit: int = 200
+) -> list[dict[str, object]]:
+    return await svc.list_referral_commissions(limit)
+
+
 @router.post("/bootstrap-super-admin")
 async def bootstrap_super_admin(body: AdminCreateIn, svc: AdminDep) -> dict[str, str]:
     return await svc.bootstrap_super_admin(body)
