@@ -280,3 +280,13 @@ def test_admin_referral_settings_via_settings_row(client, admin_auth):
     got = client.get("/api/v1/admin/settings/referral", headers=h)
     assert got.status_code == 200
     assert got.json()["data"]["commissionPercent"] == 20
+
+
+def test_admin_doctor_referral_stats(client, admin_auth, doctor_auth):
+    h = auth_header(admin_auth["token"])
+    res = client.get(f"/api/v1/admin/doctors/{doctor_auth['user_id']}/referral-stats", headers=h)
+    assert res.status_code == 200
+    body = res.json()
+    assert "referral_code" in body
+    assert "referred_count" in body
+    assert "total_commission" in body
