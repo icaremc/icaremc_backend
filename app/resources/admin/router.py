@@ -75,6 +75,21 @@ async def list_appointments(user: RequireAdmin, svc: AdminDep, limit: int = 100)
     return await svc.list_appointments(limit)
 
 
+@router.get("/appointments/{appointment_id}")
+async def get_appointment(appointment_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.get_appointment(appointment_id)
+
+
+@router.get("/children")
+async def list_children(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[RowOut]:
+    return await svc.list_children(limit)
+
+
+@router.get("/children/{child_id}")
+async def get_child(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_child(child_id)
+
+
 @router.get("/settings/{setting_id}")
 async def get_setting(setting_id: str, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.get_setting(setting_id)
