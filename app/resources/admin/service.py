@@ -406,6 +406,36 @@ class AdminService:
         return to_rows(list(rows))
 
 
+
+    async def doctor_referral_stats(self, doctor_id: UUID) -> dict[str, object]:
+        doctor = (
+            await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))
+        ).scalar_one_or_none()
+        if doctor is None:
+            raise not_found()
+        refs = list(
+            (
+                await self._repo.session.execute(
+                    select(DoctorReferral).where(DoctorReferral.doctor_id == doctor_id)
+                )
+            ).scalars().all()
+        )
+        commissions = list(
+            (
+                await self._repo.session.execute(
+                    select(DoctorReferralCommission).where(DoctorReferralCommission.doctor_id == doctor_id)
+                )
+            ).scalars().all()
+        )
+        total = sum((float(c.commission_amount) for c in commissions), 0.0)
+        currency = commissions[0].currency if commissions else "ETB"
+        return {
+            "referral_code": doctor.referral_code,
+            "referred_count": len(refs),
+            "total_commission": total,
+            "currency": currency,
+        }
+
     async def list_referrals(self, limit: int = 200) -> list[dict[str, object]]:
         refs = list(
             (

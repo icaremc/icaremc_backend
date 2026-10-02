@@ -62,6 +62,11 @@ async def list_doctor_services(doctor_id: UUID, user: RequireAdmin, svc: AdminDe
     return await svc.list_doctor_services(doctor_id)
 
 
+@router.get("/doctors/{doctor_id}/referral-stats")
+async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.doctor_referral_stats(doctor_id)
+
+
 @router.get("/appointments")
 async def list_appointments(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
     return await svc.list_appointments(limit)
