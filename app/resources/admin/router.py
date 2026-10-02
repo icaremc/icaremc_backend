@@ -11,6 +11,9 @@ from app.resources.admin.schemas import (
     AdminCreateIn,
     CategoryIn,
     CategoryPatchIn,
+    DailyTipIn,
+    DailyTipPatchIn,
+    DailyTipTranslationIn,
     DoctorVerifyIn,
     HospitalIn,
     LegalIn,
@@ -187,6 +190,38 @@ async def create_week(body: WeekIn, user: RequireAdmin, svc: AdminDep) -> RowOut
 @router.post("/pregnancy-weeks/{week_id}/translations")
 async def week_translation(week_id: UUID, body: WeekTranslationIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.week_translation(week_id, body)
+
+
+@router.get("/daily-tips")
+async def list_daily_tips(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_daily_tips()
+
+
+@router.get("/daily-tips/{tip_id}")
+async def get_daily_tip(tip_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_daily_tip(tip_id)
+
+
+@router.post("/daily-tips")
+async def create_daily_tip(body: DailyTipIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_daily_tip(body)
+
+
+@router.patch("/daily-tips/{tip_id}")
+async def patch_daily_tip(tip_id: UUID, body: DailyTipPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_daily_tip(tip_id, body)
+
+
+@router.delete("/daily-tips/{tip_id}", status_code=204)
+async def delete_daily_tip(tip_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_daily_tip(tip_id)
+
+
+@router.post("/daily-tips/{tip_id}/translations")
+async def daily_tip_translation(
+    tip_id: UUID, body: DailyTipTranslationIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.daily_tip_translation(tip_id, body)
 
 
 @router.get("/child-growth-periods")
