@@ -20,6 +20,7 @@ from app.persistence.sqlalchemy.models import (
     DoctorCategoryTranslation,
     DoctorPayoutRequest,
     DoctorProfile,
+    DoctorService,
     DoctorWallet,
     Hospital,
     LegalDocument,
@@ -107,6 +108,14 @@ class AdminService:
 
     async def list_doctors(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(DoctorProfile))).scalars().all()))
+
+    async def list_doctor_services(self, doctor_id: UUID) -> list[RowOut]:
+        rows = (
+            await self._repo.session.execute(
+                select(DoctorService).where(DoctorService.doctor_id == doctor_id)
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
 
     async def verify_doctor(self, doctor_id: UUID, body: DoctorVerifyIn, admin: AuthUser) -> RowOut:
         row = (await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))).scalar_one_or_none()
