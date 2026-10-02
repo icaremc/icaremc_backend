@@ -256,3 +256,27 @@ def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, pati
     assert rejected.json()["status"] == "rejected"
     wallet = client.get("/api/v1/doctor/wallet", headers=doctor_h).json()["wallet"]
     assert Decimal(wallet["available_balance"]) >= Decimal("200")
+
+
+def test_admin_referrals_and_commissions_empty(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    refs = client.get("/api/v1/admin/referrals", headers=h)
+    assert refs.status_code == 200
+    assert isinstance(refs.json(), list)
+
+    commissions = client.get("/api/v1/admin/referral-commissions", headers=h)
+    assert commissions.status_code == 200
+    assert isinstance(commissions.json(), list)
+
+
+def test_admin_referral_settings_via_settings_row(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    put = client.put(
+        "/api/v1/admin/settings/referral",
+        headers=h,
+        json={"data": {"commissionPercent": 20}},
+    )
+    assert put.status_code == 200
+    got = client.get("/api/v1/admin/settings/referral", headers=h)
+    assert got.status_code == 200
+    assert got.json()["data"]["commissionPercent"] == 20
