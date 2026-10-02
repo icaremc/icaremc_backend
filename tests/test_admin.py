@@ -256,3 +256,32 @@ def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, pati
     assert rejected.json()["status"] == "rejected"
     wallet = client.get("/api/v1/doctor/wallet", headers=doctor_h).json()["wallet"]
     assert Decimal(wallet["available_balance"]) >= Decimal("200")
+
+
+def test_admin_replace_doctor_booking(client, admin_auth, doctor_auth):
+    h = auth_header(admin_auth["token"])
+    doctor_id = doctor_auth["user_id"]
+    res = client.patch(
+        f"/api/v1/admin/doctors/{doctor_id}/booking",
+        headers=h,
+        json={
+            "services": [
+                {"name": "Admin consult", "price": "150.00", "is_active": True},
+            ]
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert "services" in body
+    assert any(s["name"] == "Admin consult" for s in body["services"])
+
+
+def test_admin_replace_doctor_booking_not_found(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    missing = "00000000-0000-4000-8000-000000000099"
+    res = client.patch(
+        f"/api/v1/admin/doctors/{missing}/booking",
+        headers=h,
+        json={"services": []},
+    )
+    assert res.status_code == 404
