@@ -403,6 +403,86 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
+    async def doctor_wallet(self, doctor_id: UUID) -> dict[str, object]:
+        doctor = (
+            await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))
+        ).scalar_one_or_none()
+        if doctor is None:
+            raise not_found()
+
+        wallet = (
+            await self._repo.session.execute(select(DoctorWallet).where(DoctorWallet.doctor_id == doctor_id))
+        ).scalar_one_or_none()
+
+        finance = (
+            await self._repo.session.execute(select(AppSetting).where(AppSetting.id == "finance"))
+        ).scalar_one_or_none()
+        finance_data = finance.data if finance and isinstance(finance.data, dict) else {}
+        commission_raw = finance_data.get("platformCommissionPercent", finance_data.get("platform_commission_percent", 10))
+        try:
+            commission_percent = int(float(commission_raw))
+        except (TypeError, ValueError):
+            commission_percent = 10
+
+        txs = list(
+            (
+                await self._repo.session.execute(
+                    select(WalletTransaction)
+                    .where(WalletTransaction.doctor_id == doctor_id)
+                    .order_by(WalletTransaction.created_at.desc())
+                    .limit(100)
+                )
+            ).scalars().all()
+        )
+
+        earning_appts = {
+            a.id: a
+            for a in (
+                await self._repo.session.execute(
+                    select(Appointment).where(
+                        Appointment.id.in_([t.appointment_id for t in txs if t.appointment_id is not None])
+                    )
+                )
+            ).scalars().all()
+        } if any(t.appointment_id for t in txs) else {}
+
+        earnings: list[dict[str, object]] = []
+        for tx in txs:
+            if tx.type != "appointment_earning":
+                continue
+            appt = earning_appts.get(tx.appointment_id) if tx.appointment_id else None
+            earnings.append(
+                {
+                    "id": str(tx.id),
+                    "amount": float(tx.amount),
+                    "created_at": tx.created_at.isoformat() if tx.created_at else None,
+                    "note": tx.note,
+                    "appointment_id": str(tx.appointment_id) if tx.appointment_id else None,
+                    "appointment_date": appt.appointment_date.isoformat() if appt and appt.appointment_date else None,
+                    "time_slot": appt.time_slot if appt else None,
+                    "service_name": appt.service_name if appt else None,
+                    "patient_id": str(appt.patient_id) if appt else None,
+                    "patient_name": appt.patient_name if appt else None,
+                }
+            )
+
+        wallet_out = None
+        if wallet is not None:
+            wallet_out = {
+                "available_balance": float(wallet.available_balance),
+                "pending_balance": float(wallet.pending_balance),
+                "currency": wallet.currency,
+            }
+
+        return {
+            "history": {
+                "wallet": wallet_out,
+                "commissionPercent": commission_percent,
+                "earnings": earnings,
+                "transactions": to_rows(txs),
+            }
+        }
+
     async def bootstrap_super_admin(self, body: AdminCreateIn) -> dict[str, str]:
         count = (await self._repo.session.execute(select(func.count()).select_from(AdminUser))).scalar_one()
         if count > 0:
