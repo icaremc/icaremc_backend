@@ -63,8 +63,10 @@ async def list_doctor_services(doctor_id: UUID, user: RequireAdmin, svc: AdminDe
 
 
 @router.get("/doctors/{doctor_id}/wallet")
-async def doctor_wallet(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
-    return await svc.doctor_wallet(doctor_id)
+async def doctor_wallet(
+    doctor_id: UUID, user: RequireAdmin, svc: AdminDep, limit: int = 100
+) -> dict[str, object]:
+    return await svc.doctor_wallet(doctor_id, limit)
 
 
 @router.get("/appointments")

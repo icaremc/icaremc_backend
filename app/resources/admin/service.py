@@ -403,7 +403,7 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
-    async def doctor_wallet(self, doctor_id: UUID) -> dict[str, object]:
+    async def doctor_wallet(self, doctor_id: UUID, limit: int = 100) -> dict[str, object]:
         doctor = (
             await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))
         ).scalar_one_or_none()
@@ -424,13 +424,14 @@ class AdminService:
         except (TypeError, ValueError):
             commission_percent = 10
 
+        cap = max(1, min(limit, 500))
         txs = list(
             (
                 await self._repo.session.execute(
                     select(WalletTransaction)
                     .where(WalletTransaction.doctor_id == doctor_id)
                     .order_by(WalletTransaction.created_at.desc())
-                    .limit(100)
+                    .limit(cap)
                 )
             ).scalars().all()
         )
