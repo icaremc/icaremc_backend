@@ -13,13 +13,13 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 
 async def optional_user(
-    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    token: Annotated[str | None, Depends(bearer)],
     db: DbDep,
 ) -> AuthUser | None:
-    if creds is None or not creds.credentials:
+    if not token:
         return None
     try:
-        return await get_current_user(creds, db)
+        return await get_current_user(token, db)
     except Exception:
         return None
 
