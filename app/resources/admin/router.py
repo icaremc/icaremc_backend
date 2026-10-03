@@ -11,6 +11,7 @@ from app.resources.admin.schemas import (
     AdminCreateIn,
     CategoryIn,
     CategoryPatchIn,
+    DoctorBookingIn,
     DailyTipIn,
     DailyTipPatchIn,
     DailyTipTranslationIn,
@@ -69,6 +70,13 @@ async def verify_doctor(doctor_id: UUID, body: DoctorVerifyIn, user: RequireAdmi
 @router.get("/doctors/{doctor_id}/services")
 async def list_doctor_services(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.list_doctor_services(doctor_id)
+
+
+@router.patch("/doctors/{doctor_id}/booking")
+async def replace_doctor_booking(
+    doctor_id: UUID, body: DoctorBookingIn, user: RequireAdmin, svc: AdminDep
+) -> dict[str, object]:
+    return await svc.replace_doctor_booking(doctor_id, body, user)
 
 
 @router.get("/doctors/{doctor_id}/referral-stats")
