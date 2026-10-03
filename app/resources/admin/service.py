@@ -488,13 +488,41 @@ class AdminService:
         return {"ok": True}
 
     async def pregnancy_weeks(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(PregnancyWeek))).scalars().all()))
+        rows = list((await self._repo.session.execute(select(PregnancyWeek))).scalars().all())
+        return [await self._pregnancy_week_out(row) for row in rows]
+
+    async def _pregnancy_week_out(self, row: PregnancyWeek) -> RowOut:
+        translations = (
+            await self._repo.session.execute(
+                select(PregnancyWeekTranslation).where(
+                    PregnancyWeekTranslation.pregnancy_week_id == row.id
+                )
+            )
+        ).scalars().all()
+        data = require_row(row).model_dump()
+        data["pregnancy_week_translations"] = [
+            {
+                "id": str(t.id),
+                "pregnancy_week_id": str(t.pregnancy_week_id),
+                "language_code": t.language_code,
+                "title": t.title,
+                "subtitle": t.subtitle,
+                "baby": t.baby,
+                "stage": t.stage,
+                "mother_changes": t.mother_changes,
+                "recommendations": t.recommendations,
+                "warning_signs": t.warning_signs,
+                "sections": t.sections,
+            }
+            for t in translations
+        ]
+        return RowOut.model_validate(data)
 
     async def create_week(self, body: WeekIn) -> RowOut:
         row = PregnancyWeek(**body.model_dump())
         self._repo.session.add(row)
         await self._repo.session.flush()
-        return require_row(row)
+        return await self._pregnancy_week_out(row)
 
     async def patch_week(self, week_id: UUID, body: WeekPatchIn) -> RowOut:
         row = (
@@ -505,7 +533,7 @@ class AdminService:
         for key, value in body.model_dump(exclude_unset=True).items():
             setattr(row, key, value)
         await self._repo.session.flush()
-        return require_row(row)
+        return await self._pregnancy_week_out(row)
 
     async def delete_week(self, week_id: UUID) -> None:
         row = (
