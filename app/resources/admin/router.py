@@ -75,6 +75,13 @@ async def list_doctor_services(doctor_id: UUID, user: RequireAdmin, svc: AdminDe
     return await svc.list_doctor_services(doctor_id)
 
 
+@router.get("/doctors/{doctor_id}/wallet")
+async def doctor_wallet(
+    doctor_id: UUID, user: RequireAdmin, svc: AdminDep, limit: int = 100
+) -> dict[str, object]:
+    return await svc.doctor_wallet(doctor_id, limit)
+
+
 @router.patch("/doctors/{doctor_id}/booking")
 async def replace_doctor_booking(
     doctor_id: UUID, body: DoctorBookingIn, user: RequireAdmin, svc: AdminDep

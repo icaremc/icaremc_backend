@@ -258,6 +258,26 @@ def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, pati
     assert Decimal(wallet["available_balance"]) >= Decimal("200")
 
 
+def test_admin_doctor_wallet(client, admin_auth, doctor_auth):
+    h = auth_header(admin_auth["token"])
+    res = client.get(f"/api/v1/admin/doctors/{doctor_auth['user_id']}/wallet", headers=h)
+    assert res.status_code == 200
+    body = res.json()
+    assert "history" in body
+    history = body["history"]
+    assert "wallet" in history
+    assert "commissionPercent" in history
+    assert isinstance(history["earnings"], list)
+    assert isinstance(history["transactions"], list)
+
+
+def test_admin_doctor_wallet_not_found(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    missing = "00000000-0000-4000-8000-000000000099"
+    res = client.get(f"/api/v1/admin/doctors/{missing}/wallet", headers=h)
+    assert res.status_code == 404
+
+
 def test_admin_replace_doctor_booking(client, admin_auth, doctor_auth):
     h = auth_header(admin_auth["token"])
     doctor_id = doctor_auth["user_id"]
