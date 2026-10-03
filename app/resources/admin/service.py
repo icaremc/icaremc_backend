@@ -16,6 +16,8 @@ from app.persistence.sqlalchemy.models import (
     ChildFollowupVisitTemplate,
     ChildGrowthPeriod,
     ChildGrowthPeriodTranslation,
+    GrowthClinicalAdvice,
+    GrowthClinicalAdviceTranslation,
     DailyTip,
     DailyTipTranslation,
     DocumentDelivery,
@@ -47,6 +49,9 @@ from app.resources.admin.schemas import (
     DoctorBookingIn,
     DailyTipIn,
     DailyTipPatchIn,
+    ClinicalAdviceIn,
+    ClinicalAdvicePatchIn,
+    ClinicalAdviceTranslationIn,
     DailyTipTranslationIn,
     DoctorVerifyIn,
     DocumentIn,
@@ -839,8 +844,149 @@ class AdminService:
         ).scalar_one()
         return require_row(existing)
 
-    async def growth_periods(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(ChildGrowthPeriod))).scalars().all()))
+
+    async def _clinical_advice_out(self, row: GrowthClinicalAdvice) -> RowOut:
+        translations = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdviceTranslation).where(
+                    GrowthClinicalAdviceTranslation.advice_id == row.id
+                )
+            )
+        ).scalars().all()
+        data = require_row(row).model_dump()
+        data["growth_clinical_advice_translations"] = [
+            {
+                "id": str(t.id),
+                "advice_id": str(t.advice_id),
+                "language_code": t.language_code,
+                "explain_text": t.explain_text,
+                "causes": t.causes,
+                "recommendations": t.recommendations,
+            }
+            for t in translations
+        ]
+        return RowOut.model_validate(data)
+
+    async def _upsert_clinical_advice_translations(
+        self, advice_id: UUID, translations: list[ClinicalAdviceTranslationIn]
+    ) -> None:
+        for item in translations:
+            code = item.language_code.strip().lower()
+            if not code:
+                continue
+            payload = {
+                "language_code": code,
+                "explain_text": item.explain_text.strip(),
+                "causes": item.causes.strip(),
+                "recommendations": item.recommendations.strip(),
+            }
+            existing = (
+                await self._repo.session.execute(
+                    select(GrowthClinicalAdviceTranslation).where(
+                        GrowthClinicalAdviceTranslation.advice_id == advice_id,
+                        GrowthClinicalAdviceTranslation.language_code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                self._repo.session.add(
+                    GrowthClinicalAdviceTranslation(advice_id=advice_id, **payload)
+                )
+            else:
+                for key, value in payload.items():
+                    setattr(existing, key, value)
+        await self._repo.session.flush()
+
+    async def list_clinical_advice(self) -> list[RowOut]:
+        rows = list(
+            (
+                await self._repo.session.execute(
+                    select(GrowthClinicalAdvice).order_by(
+                        GrowthClinicalAdvice.sort_order, GrowthClinicalAdvice.code
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [await self._clinical_advice_out(row) for row in rows]
+
+    async def get_clinical_advice(self, advice_id: UUID) -> RowOut:
+        row = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdvice).where(GrowthClinicalAdvice.id == advice_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        return await self._clinical_advice_out(row)
+
+    async def create_clinical_advice(self, body: ClinicalAdviceIn) -> RowOut:
+        payload = body.model_dump(exclude={"translations"})
+        payload["code"] = payload["code"].strip().lower()
+        payload["metric"] = payload["metric"].strip()
+        payload["condition"] = payload["condition"].strip()
+        row = GrowthClinicalAdvice(**payload)
+        self._repo.session.add(row)
+        await self._repo.session.flush()
+        if body.translations:
+            await self._upsert_clinical_advice_translations(row.id, body.translations)
+        return await self._clinical_advice_out(row)
+
+    async def patch_clinical_advice(self, advice_id: UUID, body: ClinicalAdvicePatchIn) -> RowOut:
+        row = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdvice).where(GrowthClinicalAdvice.id == advice_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        updates = body.model_dump(exclude_unset=True, exclude={"translations"})
+        if "code" in updates and updates["code"] is not None:
+            updates["code"] = updates["code"].strip().lower()
+        if "metric" in updates and updates["metric"] is not None:
+            updates["metric"] = updates["metric"].strip()
+        if "condition" in updates and updates["condition"] is not None:
+            updates["condition"] = updates["condition"].strip()
+        for key, value in updates.items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        if body.translations is not None:
+            await self._upsert_clinical_advice_translations(advice_id, body.translations)
+        return await self._clinical_advice_out(row)
+
+    async def delete_clinical_advice(self, advice_id: UUID) -> None:
+        row = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdvice).where(GrowthClinicalAdvice.id == advice_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+
+    async def clinical_advice_translation(
+        self, advice_id: UUID, body: ClinicalAdviceTranslationIn
+    ) -> RowOut:
+        advice = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdvice).where(GrowthClinicalAdvice.id == advice_id)
+            )
+        ).scalar_one_or_none()
+        if advice is None:
+            raise not_found()
+        await self._upsert_clinical_advice_translations(advice_id, [body])
+        existing = (
+            await self._repo.session.execute(
+                select(GrowthClinicalAdviceTranslation).where(
+                    GrowthClinicalAdviceTranslation.advice_id == advice_id,
+                    GrowthClinicalAdviceTranslation.language_code
+                    == body.language_code.strip().lower(),
+                )
+            )
+        ).scalar_one()
+        return require_row(existing)
 
     async def delete_followup_template(self, template_id: UUID) -> None:
         row = (
