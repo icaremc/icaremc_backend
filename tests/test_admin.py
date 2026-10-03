@@ -284,6 +284,41 @@ def test_admin_replace_doctor_booking_not_found(client, admin_auth):
         headers=h,
         json={"services": []},
     )
+    assert res.status_code == 404
+
+
+def test_admin_referrals_and_commissions_empty(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    refs = client.get("/api/v1/admin/referrals", headers=h)
+    assert refs.status_code == 200
+    assert isinstance(refs.json(), list)
+
+    commissions = client.get("/api/v1/admin/referral-commissions", headers=h)
+    assert commissions.status_code == 200
+    assert isinstance(commissions.json(), list)
+
+
+def test_admin_referral_settings_via_settings_row(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    put = client.put(
+        "/api/v1/admin/settings/referral",
+        headers=h,
+        json={"data": {"commissionPercent": 20}},
+    )
+    assert put.status_code == 200
+    got = client.get("/api/v1/admin/settings/referral", headers=h)
+    assert got.status_code == 200
+    assert got.json()["data"]["commissionPercent"] == 20
+
+
+def test_admin_doctor_referral_stats(client, admin_auth, doctor_auth):
+    h = auth_header(admin_auth["token"])
+    res = client.get(f"/api/v1/admin/doctors/{doctor_auth['user_id']}/referral-stats", headers=h)
+    assert res.status_code == 200
+    body = res.json()
+    assert "referral_code" in body
+    assert "referred_count" in body
+    assert "total_commission" in body
 def test_admin_get_appointment_not_found(client, admin_auth):
     h = auth_header(admin_auth["token"])
     missing = "00000000-0000-4000-8000-000000000099"
@@ -303,3 +338,184 @@ def test_admin_get_child_not_found(client, admin_auth):
     missing = "00000000-0000-4000-8000-000000000099"
     res = client.get(f"/api/v1/admin/children/{missing}", headers=h)
     assert res.status_code == 404
+
+
+def test_admin_pregnancy_week_patch_delete(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    week = client.post(
+        "/api/v1/admin/pregnancy-weeks",
+        headers=h,
+        json={"week_number": 20, "trimester": 2, "is_published": False},
+    )
+    assert week.status_code == 200, week.text
+    week_id = week.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}",
+        headers=h,
+        json={"is_published": True, "image_note": "mid pregnancy"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["is_published"] is True
+
+    tr = client.post(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}/translations",
+        headers=h,
+        json={"language_code": "en", "title": "Week 20"},
+    )
+    assert tr.status_code == 200
+    tr2 = client.post(
+        f"/api/v1/admin/pregnancy-weeks/{week_id}/translations",
+        headers=h,
+        json={"language_code": "en", "title": "Week 20 updated", "subtitle": "Halfway"},
+    )
+    assert tr2.status_code == 200
+    assert tr2.json()["title"] == "Week 20 updated"
+
+    deleted = client.delete(f"/api/v1/admin/pregnancy-weeks/{week_id}", headers=h)
+    assert deleted.status_code == 204
+
+
+def test_admin_child_growth_period_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/child-growth-periods",
+        headers=h,
+        json={
+            "age_months": 6,
+            "age_label": "6 months",
+            "age_group": "infant",
+            "is_published": True,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Six months",
+                    "milestones": [{"key": "sit"}],
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    period_id = created.json()["id"]
+    assert len(created.json()["child_growth_period_translations"]) == 1
+
+    got = client.get(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert got.status_code == 200
+    assert got.json()["age_months"] == 6
+
+    patched = client.patch(
+        f"/api/v1/admin/child-growth-periods/{period_id}",
+        headers=h,
+        json={
+            "age_label": "Half year",
+            "translations": [
+                {"language_code": "en", "title": "Six months", "subtitle": "Sitting"},
+                {"language_code": "am", "title": "ስድስት ወር"},
+            ],
+        },
+    )
+    assert patched.status_code == 200
+    assert patched.json()["age_label"] == "Half year"
+    assert len(patched.json()["child_growth_period_translations"]) == 2
+
+    deleted = client.delete(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/v1/admin/child-growth-periods/{period_id}", headers=h)
+    assert missing.status_code == 404
+
+
+def test_admin_followup_template_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/followup-templates",
+        headers=h,
+        json={
+            "code": "visit_test_6mo",
+            "label": "6 month visit",
+            "offset_months": 6,
+            "is_published": True,
+            "label_translations": {"en": {"name": "6 month visit"}},
+        },
+    )
+    assert created.status_code == 200, created.text
+    template_id = created.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/followup-templates/{template_id}",
+        headers=h,
+        json={"label": "6-month check-up", "sort_order": 10},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["label"] == "6-month check-up"
+    assert patched.json()["sort_order"] == 10
+
+    deleted = client.delete(f"/api/v1/admin/followup-templates/{template_id}", headers=h)
+    assert deleted.status_code == 204
+
+
+def test_admin_daily_tips_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/daily-tips",
+        headers=h,
+        json={
+            "week_number": 8,
+            "day_number": 3,
+            "category": "nutrition",
+            "is_active": True,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Drink water",
+                    "content": "Stay hydrated this week.",
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    tip_id = created.json()["id"]
+    assert created.json()["week_number"] == 8
+    assert len(created.json()["daily_tip_translations"]) == 1
+
+    listed = client.get("/api/v1/admin/daily-tips", headers=h)
+    assert listed.status_code == 200
+    assert any(row["id"] == tip_id for row in listed.json())
+
+    got = client.get(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert got.status_code == 200
+    assert got.json()["day_number"] == 3
+
+    patched = client.patch(
+        f"/api/v1/admin/daily-tips/{tip_id}",
+        headers=h,
+        json={
+            "is_active": False,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Drink water",
+                    "content": "Updated tip body.",
+                },
+                {
+                    "language_code": "am",
+                    "title": "Water am",
+                    "content": "Updated am body.",
+                },
+            ],
+        },
+    )
+    assert patched.status_code == 200
+    assert patched.json()["is_active"] is False
+    assert len(patched.json()["daily_tip_translations"]) == 2
+
+    tr = client.post(
+        f"/api/v1/admin/daily-tips/{tip_id}/translations",
+        headers=h,
+        json={"language_code": "om", "title": "Water om", "content": "Updated om body."},
+    )
+    assert tr.status_code == 200
+
+    deleted = client.delete(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert missing.status_code == 404
