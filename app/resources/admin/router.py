@@ -9,6 +9,8 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
     AdminCreateIn,
+    AdminPatchIn,
+    AppointmentStatusIn,
     CategoryIn,
     CategoryPatchIn,
     DoctorBookingIn,
@@ -16,6 +18,7 @@ from app.resources.admin.schemas import (
     DailyTipPatchIn,
     DailyTipTranslationIn,
     DoctorVerifyIn,
+    DocumentIn,
     FollowupTemplateIn,
     FollowupTemplatePatchIn,
     GrowthPeriodIn,
@@ -79,6 +82,11 @@ async def replace_doctor_booking(
     return await svc.replace_doctor_booking(doctor_id, body, user)
 
 
+@router.get("/doctors/{doctor_id}/document-deliveries")
+async def doctor_document_deliveries(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.doctor_document_deliveries(doctor_id)
+
+
 @router.get("/doctors/{doctor_id}/referral-stats")
 async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.doctor_referral_stats(doctor_id)
@@ -87,6 +95,13 @@ async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminD
 @router.get("/appointments")
 async def list_appointments(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
     return await svc.list_appointments(limit)
+
+
+@router.patch("/appointments/{appointment_id}")
+async def patch_appointment(
+    appointment_id: UUID, body: AppointmentStatusIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_appointment(appointment_id, body, user)
 
 
 @router.get("/appointments/{appointment_id}")
@@ -152,6 +167,11 @@ async def list_admins(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
 @router.post("/admins")
 async def create_admin(body: AdminCreateIn, user: RequireAdmin, svc: AdminDep) -> dict[str, str]:
     return await svc.create_admin(body, user)
+
+
+@router.patch("/admins/{admin_id}")
+async def patch_admin(admin_id: UUID, body: AdminPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_admin(admin_id, body, user)
 
 
 @router.get("/hospitals")
@@ -326,6 +346,11 @@ async def upsert_legal(body: LegalIn, user: RequireAdmin, svc: AdminDep) -> RowO
 @router.get("/documents")
 async def documents(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.documents()
+
+
+@router.post("/documents")
+async def create_document(body: DocumentIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_document(body, user)
 
 
 @router.post("/documents/{document_id}/deliver")

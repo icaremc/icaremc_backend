@@ -39,6 +39,8 @@ from app.persistence.sqlalchemy.models import (
 from app.resources.admin.repository import AdminRepository
 from app.resources.admin.schemas import (
     AdminCreateIn,
+    AdminPatchIn,
+    AppointmentStatusIn,
     CategoryIn,
     CategoryPatchIn,
     CategoryTranslationIn,
@@ -47,6 +49,7 @@ from app.resources.admin.schemas import (
     DailyTipPatchIn,
     DailyTipTranslationIn,
     DoctorVerifyIn,
+    DocumentIn,
     FollowupTemplateIn,
     FollowupTemplatePatchIn,
     GrowthPeriodIn,
@@ -65,6 +68,9 @@ from app.resources.errors import bad_request, forbidden, not_found
 from app.resources.auth.repository import SqlAlchemyAuthRepository
 from app.resources.auth.service import AuthService
 from app.resources.serialize import require_row, to_rows
+
+_APPOINTMENT_STATUSES = frozenset({"pending", "confirmed", "completed", "cancelled"})
+_ADMIN_ROLES = frozenset({"super_admin", "content_admin", "support", "viewer"})
 
 
 class AdminService:
@@ -204,6 +210,29 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
+    async def patch_appointment(self, appointment_id: UUID, body: AppointmentStatusIn, admin: AuthUser) -> RowOut:
+        if body.status not in _APPOINTMENT_STATUSES:
+            raise bad_request("status must be pending, confirmed, completed, or cancelled")
+        row = (
+            await self._repo.session.execute(select(Appointment).where(Appointment.id == appointment_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        previous = row.status
+        row.status = body.status
+        if body.status == "cancelled":
+            row.cancelled_by = "admin"
+        await self._log(
+            admin,
+            "appointment.status",
+            "Appointment status updated",
+            appointment_id=str(appointment_id),
+            previous_status=previous,
+            new_status=body.status,
+        )
+        await self._repo.session.flush()
+        return require_row(row)
+
     async def get_appointment(self, appointment_id: UUID) -> dict[str, object]:
         row = (
             await self._repo.session.execute(select(Appointment).where(Appointment.id == appointment_id))
@@ -330,6 +359,30 @@ class AdminService:
             email=body.email, password=body.password, full_name=body.full_name, admin_role=body.admin_role
         )
         return {"id": str(admin_id)}
+
+    async def patch_admin(self, admin_id: UUID, body: AdminPatchIn, actor: AuthUser) -> RowOut:
+        if actor.admin_role != "super_admin":
+            raise forbidden("super_admin required")
+        row = (
+            await self._repo.session.execute(select(AdminUser).where(AdminUser.id == admin_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        if body.is_active is False and admin_id == actor.id:
+            raise bad_request("Cannot deactivate your own admin account")
+        if body.admin_role is not None:
+            if body.admin_role not in _ADMIN_ROLES:
+                raise bad_request("Invalid admin_role")
+            if admin_id == actor.id and body.admin_role != actor.admin_role:
+                raise bad_request("Cannot change your own admin role")
+            row.admin_role = body.admin_role
+        if body.is_active is not None:
+            row.is_active = body.is_active
+        if body.full_name is not None:
+            row.full_name = body.full_name
+        await self._log(actor, "admin.patch", "Admin updated", admin_id=str(admin_id))
+        await self._repo.session.flush()
+        return require_row(row)
 
     async def list_hospitals(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(Hospital))).scalars().all()))
@@ -795,11 +848,35 @@ class AdminService:
     async def documents(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(AdminDocument))).scalars().all()))
 
+    async def create_document(self, body: DocumentIn, admin: AuthUser) -> RowOut:
+        row = AdminDocument(
+            title=body.title,
+            category=body.category,
+            storage_path=body.storage_path,
+            file_name=body.file_name,
+            mime_type=body.mime_type,
+            uploaded_by=admin.id,
+        )
+        self._repo.session.add(row)
+        await self._log(admin, "document.create", "Admin document created", title=body.title)
+        await self._repo.session.flush()
+        return require_row(row)
+
     async def deliver_document(self, document_id: UUID, recipient_id: UUID, sender_id: UUID) -> RowOut:
         row = DocumentDelivery(document_id=document_id, recipient_id=recipient_id, sent_by=sender_id)
         self._repo.session.add(row)
         await self._repo.session.flush()
         return require_row(row)
+
+    async def doctor_document_deliveries(self, doctor_id: UUID) -> list[RowOut]:
+        rows = (
+            await self._repo.session.execute(
+                select(DocumentDelivery)
+                .where(DocumentDelivery.recipient_id == doctor_id)
+                .order_by(DocumentDelivery.sent_at.desc())
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
 
     async def admin_activity(self, limit: int) -> list[RowOut]:
         rows = (

@@ -175,6 +175,24 @@ class DoctorBookingIn(BaseModel):
     services: list[DoctorServiceItemIn] | None = None
 
 
+class AppointmentStatusIn(BaseModel):
+    status: str
+
+
+class AdminPatchIn(BaseModel):
+    is_active: bool | None = None
+    admin_role: str | None = None
+    full_name: str | None = None
+
+
+class DocumentIn(BaseModel):
+    title: str
+    category: str = "other"
+    storage_path: str
+    file_name: str
+    mime_type: str = "application/pdf"
+
+
 class DailyTipTranslationIn(BaseModel):
     language_code: str
     title: str
