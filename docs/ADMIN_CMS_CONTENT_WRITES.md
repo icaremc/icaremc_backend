@@ -6,11 +6,12 @@ Added for the admin portal staging bridge.
 
 | Method | Path | Notes |
 |--------|------|--------|
+| GET | `/api/v1/admin/pregnancy-weeks` | All weeks with nested `pregnancy_week_translations` |
 | PATCH | `/api/v1/admin/pregnancy-weeks/{id}` | Patch week fields |
 | DELETE | `/api/v1/admin/pregnancy-weeks/{id}` | Cascade-deletes translations |
 | POST | `/api/v1/admin/pregnancy-weeks/{id}/translations` | Upsert one locale (create or update) |
 
-Existing `GET|POST /pregnancy-weeks` unchanged.
+Existing `POST /pregnancy-weeks` unchanged; create/patch responses also include translations.
 
 ## Child growth periods
 
