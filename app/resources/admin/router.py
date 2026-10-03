@@ -12,12 +12,18 @@ from app.resources.admin.schemas import (
     CategoryIn,
     CategoryPatchIn,
     DoctorVerifyIn,
+    FollowupTemplateIn,
+    FollowupTemplatePatchIn,
+    GrowthPeriodIn,
+    GrowthPeriodPatchIn,
+    GrowthPeriodTranslationIn,
     HospitalIn,
     LegalIn,
     PayoutActionIn,
     SettingIn,
     SubscriptionGrantIn,
     WeekIn,
+    WeekPatchIn,
     WeekTranslationIn,
 )
 from app.resources.admin.service import AdminService
@@ -189,6 +195,16 @@ async def create_week(body: WeekIn, user: RequireAdmin, svc: AdminDep) -> RowOut
     return await svc.create_week(body)
 
 
+@router.patch("/pregnancy-weeks/{week_id}")
+async def patch_week(week_id: UUID, body: WeekPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_week(week_id, body)
+
+
+@router.delete("/pregnancy-weeks/{week_id}", status_code=204)
+async def delete_week(week_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_week(week_id)
+
+
 @router.post("/pregnancy-weeks/{week_id}/translations")
 async def week_translation(week_id: UUID, body: WeekTranslationIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.week_translation(week_id, body)
@@ -199,9 +215,59 @@ async def growth_periods(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.growth_periods()
 
 
+@router.get("/child-growth-periods/{period_id}")
+async def get_growth_period(period_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_growth_period(period_id)
+
+
+@router.post("/child-growth-periods")
+async def create_growth_period(body: GrowthPeriodIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_growth_period(body)
+
+
+@router.patch("/child-growth-periods/{period_id}")
+async def patch_growth_period(
+    period_id: UUID, body: GrowthPeriodPatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_growth_period(period_id, body)
+
+
+@router.delete("/child-growth-periods/{period_id}", status_code=204)
+async def delete_growth_period(period_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_growth_period(period_id)
+
+
+@router.post("/child-growth-periods/{period_id}/translations")
+async def growth_period_translation(
+    period_id: UUID, body: GrowthPeriodTranslationIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.growth_period_translation(period_id, body)
+
+
 @router.get("/followup-templates")
 async def followup_templates(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.followup_templates()
+
+
+@router.post("/followup-templates")
+async def create_followup_template(
+    body: FollowupTemplateIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.create_followup_template(body)
+
+
+@router.patch("/followup-templates/{template_id}")
+async def patch_followup_template(
+    template_id: UUID, body: FollowupTemplatePatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_followup_template(template_id, body)
+
+
+@router.delete("/followup-templates/{template_id}", status_code=204)
+async def delete_followup_template(
+    template_id: UUID, user: RequireAdmin, svc: AdminDep
+) -> None:
+    await svc.delete_followup_template(template_id)
 
 
 @router.get("/legal-documents")
