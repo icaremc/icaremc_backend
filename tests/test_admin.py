@@ -423,3 +423,71 @@ def test_admin_followup_template_crud(client, admin_auth):
 
     deleted = client.delete(f"/api/v1/admin/followup-templates/{template_id}", headers=h)
     assert deleted.status_code == 204
+
+
+def test_admin_daily_tips_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/daily-tips",
+        headers=h,
+        json={
+            "week_number": 8,
+            "day_number": 3,
+            "category": "nutrition",
+            "is_active": True,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Drink water",
+                    "content": "Stay hydrated this week.",
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    tip_id = created.json()["id"]
+    assert created.json()["week_number"] == 8
+    assert len(created.json()["daily_tip_translations"]) == 1
+
+    listed = client.get("/api/v1/admin/daily-tips", headers=h)
+    assert listed.status_code == 200
+    assert any(row["id"] == tip_id for row in listed.json())
+
+    got = client.get(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert got.status_code == 200
+    assert got.json()["day_number"] == 3
+
+    patched = client.patch(
+        f"/api/v1/admin/daily-tips/{tip_id}",
+        headers=h,
+        json={
+            "is_active": False,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "title": "Drink water",
+                    "content": "Updated tip body.",
+                },
+                {
+                    "language_code": "am",
+                    "title": "Water am",
+                    "content": "Updated am body.",
+                },
+            ],
+        },
+    )
+    assert patched.status_code == 200
+    assert patched.json()["is_active"] is False
+    assert len(patched.json()["daily_tip_translations"]) == 2
+
+    tr = client.post(
+        f"/api/v1/admin/daily-tips/{tip_id}/translations",
+        headers=h,
+        json={"language_code": "om", "title": "Water om", "content": "Updated om body."},
+    )
+    assert tr.status_code == 200
+
+    deleted = client.delete(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
+    assert missing.status_code == 404

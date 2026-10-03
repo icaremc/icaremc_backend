@@ -16,6 +16,8 @@ from app.persistence.sqlalchemy.models import (
     ChildFollowupVisitTemplate,
     ChildGrowthPeriod,
     ChildGrowthPeriodTranslation,
+    DailyTip,
+    DailyTipTranslation,
     DocumentDelivery,
     DoctorCategory,
     DoctorCategoryTranslation,
@@ -40,6 +42,9 @@ from app.resources.admin.schemas import (
     CategoryIn,
     CategoryPatchIn,
     CategoryTranslationIn,
+    DailyTipIn,
+    DailyTipPatchIn,
+    DailyTipTranslationIn,
     DoctorVerifyIn,
     FollowupTemplateIn,
     FollowupTemplatePatchIn,
@@ -579,6 +584,124 @@ class AdminService:
             setattr(row, key, value)
         await self._repo.session.flush()
         return require_row(row)
+
+    async def _daily_tip_out(self, row: DailyTip) -> RowOut:
+        translations = (
+            await self._repo.session.execute(
+                select(DailyTipTranslation).where(DailyTipTranslation.tip_id == row.id)
+            )
+        ).scalars().all()
+        data = require_row(row).model_dump()
+        data["daily_tip_translations"] = [
+            {
+                "id": str(t.id),
+                "tip_id": str(t.tip_id),
+                "language_code": t.language_code,
+                "title": t.title,
+                "content": t.content,
+            }
+            for t in translations
+        ]
+        return RowOut.model_validate(data)
+
+    async def _upsert_daily_tip_translations(
+        self, tip_id: UUID, translations: list[DailyTipTranslationIn]
+    ) -> None:
+        for item in translations:
+            code = item.language_code.strip().lower()
+            title = item.title.strip()
+            content = item.content.strip()
+            if not code or not title or not content:
+                continue
+            existing = (
+                await self._repo.session.execute(
+                    select(DailyTipTranslation).where(
+                        DailyTipTranslation.tip_id == tip_id,
+                        DailyTipTranslation.language_code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                self._repo.session.add(
+                    DailyTipTranslation(
+                        tip_id=tip_id, language_code=code, title=title, content=content
+                    )
+                )
+            else:
+                existing.title = title
+                existing.content = content
+        await self._repo.session.flush()
+
+    async def list_daily_tips(self) -> list[RowOut]:
+        rows = list(
+            (
+                await self._repo.session.execute(
+                    select(DailyTip).order_by(DailyTip.week_number, DailyTip.day_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [await self._daily_tip_out(row) for row in rows]
+
+    async def get_daily_tip(self, tip_id: UUID) -> RowOut:
+        row = (
+            await self._repo.session.execute(select(DailyTip).where(DailyTip.id == tip_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        return await self._daily_tip_out(row)
+
+    async def create_daily_tip(self, body: DailyTipIn) -> RowOut:
+        payload = body.model_dump(exclude={"translations"})
+        row = DailyTip(**payload)
+        self._repo.session.add(row)
+        await self._repo.session.flush()
+        if body.translations:
+            await self._upsert_daily_tip_translations(row.id, body.translations)
+        return await self._daily_tip_out(row)
+
+    async def patch_daily_tip(self, tip_id: UUID, body: DailyTipPatchIn) -> RowOut:
+        row = (
+            await self._repo.session.execute(select(DailyTip).where(DailyTip.id == tip_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True, exclude={"translations"}).items():
+            setattr(row, key, value)
+        await self._repo.session.flush()
+        if body.translations is not None:
+            await self._upsert_daily_tip_translations(tip_id, body.translations)
+        return await self._daily_tip_out(row)
+
+    async def delete_daily_tip(self, tip_id: UUID) -> None:
+        row = (
+            await self._repo.session.execute(select(DailyTip).where(DailyTip.id == tip_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise not_found()
+        await self._repo.session.delete(row)
+        await self._repo.session.flush()
+
+    async def daily_tip_translation(self, tip_id: UUID, body: DailyTipTranslationIn) -> RowOut:
+        tip = (
+            await self._repo.session.execute(select(DailyTip).where(DailyTip.id == tip_id))
+        ).scalar_one_or_none()
+        if tip is None:
+            raise not_found()
+        await self._upsert_daily_tip_translations(tip_id, [body])
+        existing = (
+            await self._repo.session.execute(
+                select(DailyTipTranslation).where(
+                    DailyTipTranslation.tip_id == tip_id,
+                    DailyTipTranslation.language_code == body.language_code.strip().lower(),
+                )
+            )
+        ).scalar_one()
+        return require_row(existing)
+
+    async def growth_periods(self) -> list[RowOut]:
+        return to_rows(list((await self._repo.session.execute(select(ChildGrowthPeriod))).scalars().all()))
 
     async def delete_followup_template(self, template_id: UUID) -> None:
         row = (
