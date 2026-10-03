@@ -30,3 +30,5 @@ Existing `POST /pregnancy-weeks` unchanged; create/patch responses also include 
 | POST | `/api/v1/admin/followup-templates` | Create template |
 | PATCH | `/api/v1/admin/followup-templates/{id}` | Patch (code immutable) |
 | DELETE | `/api/v1/admin/followup-templates/{id}` | Delete template |
+
+Also: admin `GET /child-growth-periods` now always nests `child_growth_period_translations` (removed a shadowed list stub).

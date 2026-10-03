@@ -602,3 +602,76 @@ def test_admin_daily_tips_crud(client, admin_auth):
     assert deleted.status_code == 204
     missing = client.get(f"/api/v1/admin/daily-tips/{tip_id}", headers=h)
     assert missing.status_code == 404
+
+
+def test_admin_clinical_advice_crud(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    created = client.post(
+        "/api/v1/admin/clinical-advice",
+        headers=h,
+        json={
+            "code": "wfa_test_high",
+            "metric": "weight",
+            "condition": "high",
+            "min_age_months": 0,
+            "max_age_months": 24,
+            "sort_order": 99,
+            "is_active": True,
+            "translations": [
+                {
+                    "language_code": "en",
+                    "explain_text": "High weight",
+                    "causes": "Calories",
+                    "recommendations": "Play more",
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    advice_id = created.json()["id"]
+    assert len(created.json()["growth_clinical_advice_translations"]) == 1
+
+    listed = client.get("/api/v1/admin/clinical-advice", headers=h)
+    assert listed.status_code == 200
+    assert any(row["id"] == advice_id for row in listed.json())
+
+    patched = client.patch(
+        f"/api/v1/admin/clinical-advice/{advice_id}",
+        headers=h,
+        json={"is_active": False, "translations": [
+            {
+                "language_code": "en",
+                "explain_text": "High weight updated",
+                "causes": "Calories",
+                "recommendations": "Play more",
+            },
+            {
+                "language_code": "am",
+                "explain_text": "ክብደት ከፍተኛ",
+                "causes": "",
+                "recommendations": "",
+            },
+        ]},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["is_active"] is False
+    assert len(patched.json()["growth_clinical_advice_translations"]) == 2
+
+    tr = client.post(
+        f"/api/v1/admin/clinical-advice/{advice_id}/translations",
+        headers=h,
+        json={
+            "language_code": "om",
+            "explain_text": "Ulfaatina ol'aanaa",
+            "causes": "",
+            "recommendations": "",
+        },
+    )
+    assert tr.status_code == 200
+
+    got = client.get(f"/api/v1/admin/clinical-advice/{advice_id}", headers=h)
+    assert got.status_code == 200
+    assert len(got.json()["growth_clinical_advice_translations"]) == 3
+
+    deleted = client.delete(f"/api/v1/admin/clinical-advice/{advice_id}", headers=h)
+    assert deleted.status_code == 204

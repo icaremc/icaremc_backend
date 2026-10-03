@@ -213,3 +213,33 @@ class DailyTipPatchIn(BaseModel):
     category: str | None = None
     is_active: bool | None = None
     translations: list[DailyTipTranslationIn] | None = None
+
+
+class ClinicalAdviceTranslationIn(BaseModel):
+    language_code: str
+    explain_text: str = ""
+    causes: str = ""
+    recommendations: str = ""
+
+
+class ClinicalAdviceIn(BaseModel):
+    code: str
+    metric: str
+    condition: str
+    min_age_months: float | None = 0
+    max_age_months: float | None = 240
+    sort_order: int = 0
+    is_active: bool = True
+    translations: list[ClinicalAdviceTranslationIn] | None = None
+
+
+class ClinicalAdvicePatchIn(BaseModel):
+    code: str | None = None
+    metric: str | None = None
+    condition: str | None = None
+    min_age_months: float | None = None
+    max_age_months: float | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+    translations: list[ClinicalAdviceTranslationIn] | None = None
+
