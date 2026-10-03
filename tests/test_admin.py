@@ -449,6 +449,12 @@ def test_admin_pregnancy_week_patch_delete(client, admin_auth):
     assert tr2.status_code == 200
     assert tr2.json()["title"] == "Week 20 updated"
 
+    listed = client.get("/api/v1/admin/pregnancy-weeks", headers=h)
+    assert listed.status_code == 200
+    row = next(r for r in listed.json() if r["id"] == week_id)
+    assert len(row["pregnancy_week_translations"]) == 1
+    assert row["pregnancy_week_translations"][0]["title"] == "Week 20 updated"
+
     deleted = client.delete(f"/api/v1/admin/pregnancy-weeks/{week_id}", headers=h)
     assert deleted.status_code == 204
 
