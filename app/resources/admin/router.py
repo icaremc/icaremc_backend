@@ -14,6 +14,9 @@ from app.resources.admin.schemas import (
     CategoryIn,
     CategoryPatchIn,
     DoctorBookingIn,
+    ClinicalAdviceIn,
+    ClinicalAdvicePatchIn,
+    ClinicalAdviceTranslationIn,
     DailyTipIn,
     DailyTipPatchIn,
     DailyTipTranslationIn,
@@ -279,6 +282,41 @@ async def daily_tip_translation(
 ) -> RowOut:
     return await svc.daily_tip_translation(tip_id, body)
 
+
+
+
+@router.get("/clinical-advice")
+async def list_clinical_advice(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_clinical_advice()
+
+
+@router.get("/clinical-advice/{advice_id}")
+async def get_clinical_advice(advice_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_clinical_advice(advice_id)
+
+
+@router.post("/clinical-advice")
+async def create_clinical_advice(body: ClinicalAdviceIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_clinical_advice(body)
+
+
+@router.patch("/clinical-advice/{advice_id}")
+async def patch_clinical_advice(
+    advice_id: UUID, body: ClinicalAdvicePatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_clinical_advice(advice_id, body)
+
+
+@router.delete("/clinical-advice/{advice_id}", status_code=204)
+async def delete_clinical_advice(advice_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_clinical_advice(advice_id)
+
+
+@router.post("/clinical-advice/{advice_id}/translations")
+async def clinical_advice_translation(
+    advice_id: UUID, body: ClinicalAdviceTranslationIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.clinical_advice_translation(advice_id, body)
 
 @router.get("/child-growth-periods")
 async def growth_periods(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
