@@ -9,15 +9,28 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
     AdminCreateIn,
+    AdminPatchIn,
+    AppointmentStatusIn,
     CategoryIn,
     CategoryPatchIn,
+    DoctorBookingIn,
+    DailyTipIn,
+    DailyTipPatchIn,
+    DailyTipTranslationIn,
     DoctorVerifyIn,
+    DocumentIn,
+    FollowupTemplateIn,
+    FollowupTemplatePatchIn,
+    GrowthPeriodIn,
+    GrowthPeriodPatchIn,
+    GrowthPeriodTranslationIn,
     HospitalIn,
     LegalIn,
     PayoutActionIn,
     SettingIn,
     SubscriptionGrantIn,
     WeekIn,
+    WeekPatchIn,
     WeekTranslationIn,
 )
 from app.resources.admin.service import AdminService
@@ -69,9 +82,48 @@ async def doctor_wallet(
     return await svc.doctor_wallet(doctor_id, limit)
 
 
+@router.patch("/doctors/{doctor_id}/booking")
+async def replace_doctor_booking(
+    doctor_id: UUID, body: DoctorBookingIn, user: RequireAdmin, svc: AdminDep
+) -> dict[str, object]:
+    return await svc.replace_doctor_booking(doctor_id, body, user)
+
+
+@router.get("/doctors/{doctor_id}/document-deliveries")
+async def doctor_document_deliveries(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.doctor_document_deliveries(doctor_id)
+
+
+@router.get("/doctors/{doctor_id}/referral-stats")
+async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.doctor_referral_stats(doctor_id)
+
+
 @router.get("/appointments")
 async def list_appointments(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
     return await svc.list_appointments(limit)
+
+
+@router.patch("/appointments/{appointment_id}")
+async def patch_appointment(
+    appointment_id: UUID, body: AppointmentStatusIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_appointment(appointment_id, body, user)
+
+
+@router.get("/appointments/{appointment_id}")
+async def get_appointment(appointment_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.get_appointment(appointment_id)
+
+
+@router.get("/children")
+async def list_children(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[RowOut]:
+    return await svc.list_children(limit)
+
+
+@router.get("/children/{child_id}")
+async def get_child(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_child(child_id)
 
 
 @router.get("/settings/{setting_id}")
@@ -122,6 +174,11 @@ async def list_admins(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
 @router.post("/admins")
 async def create_admin(body: AdminCreateIn, user: RequireAdmin, svc: AdminDep) -> dict[str, str]:
     return await svc.create_admin(body, user)
+
+
+@router.patch("/admins/{admin_id}")
+async def patch_admin(admin_id: UUID, body: AdminPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_admin(admin_id, body, user)
 
 
 @router.get("/hospitals")
@@ -176,9 +233,51 @@ async def create_week(body: WeekIn, user: RequireAdmin, svc: AdminDep) -> RowOut
     return await svc.create_week(body)
 
 
+@router.patch("/pregnancy-weeks/{week_id}")
+async def patch_week(week_id: UUID, body: WeekPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_week(week_id, body)
+
+
+@router.delete("/pregnancy-weeks/{week_id}", status_code=204)
+async def delete_week(week_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_week(week_id)
+
+
 @router.post("/pregnancy-weeks/{week_id}/translations")
 async def week_translation(week_id: UUID, body: WeekTranslationIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.week_translation(week_id, body)
+
+
+@router.get("/daily-tips")
+async def list_daily_tips(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_daily_tips()
+
+
+@router.get("/daily-tips/{tip_id}")
+async def get_daily_tip(tip_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_daily_tip(tip_id)
+
+
+@router.post("/daily-tips")
+async def create_daily_tip(body: DailyTipIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_daily_tip(body)
+
+
+@router.patch("/daily-tips/{tip_id}")
+async def patch_daily_tip(tip_id: UUID, body: DailyTipPatchIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.patch_daily_tip(tip_id, body)
+
+
+@router.delete("/daily-tips/{tip_id}", status_code=204)
+async def delete_daily_tip(tip_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_daily_tip(tip_id)
+
+
+@router.post("/daily-tips/{tip_id}/translations")
+async def daily_tip_translation(
+    tip_id: UUID, body: DailyTipTranslationIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.daily_tip_translation(tip_id, body)
 
 
 @router.get("/child-growth-periods")
@@ -186,9 +285,59 @@ async def growth_periods(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.growth_periods()
 
 
+@router.get("/child-growth-periods/{period_id}")
+async def get_growth_period(period_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.get_growth_period(period_id)
+
+
+@router.post("/child-growth-periods")
+async def create_growth_period(body: GrowthPeriodIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_growth_period(body)
+
+
+@router.patch("/child-growth-periods/{period_id}")
+async def patch_growth_period(
+    period_id: UUID, body: GrowthPeriodPatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_growth_period(period_id, body)
+
+
+@router.delete("/child-growth-periods/{period_id}", status_code=204)
+async def delete_growth_period(period_id: UUID, user: RequireAdmin, svc: AdminDep) -> None:
+    await svc.delete_growth_period(period_id)
+
+
+@router.post("/child-growth-periods/{period_id}/translations")
+async def growth_period_translation(
+    period_id: UUID, body: GrowthPeriodTranslationIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.growth_period_translation(period_id, body)
+
+
 @router.get("/followup-templates")
 async def followup_templates(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.followup_templates()
+
+
+@router.post("/followup-templates")
+async def create_followup_template(
+    body: FollowupTemplateIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.create_followup_template(body)
+
+
+@router.patch("/followup-templates/{template_id}")
+async def patch_followup_template(
+    template_id: UUID, body: FollowupTemplatePatchIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.patch_followup_template(template_id, body)
+
+
+@router.delete("/followup-templates/{template_id}", status_code=204)
+async def delete_followup_template(
+    template_id: UUID, user: RequireAdmin, svc: AdminDep
+) -> None:
+    await svc.delete_followup_template(template_id)
 
 
 @router.get("/legal-documents")
@@ -206,6 +355,11 @@ async def documents(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.documents()
 
 
+@router.post("/documents")
+async def create_document(body: DocumentIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
+    return await svc.create_document(body, user)
+
+
 @router.post("/documents/{document_id}/deliver")
 async def deliver_document(document_id: UUID, recipient_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.deliver_document(document_id, recipient_id, user.id)
@@ -219,6 +373,20 @@ async def admin_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) ->
 @router.get("/activity/platform")
 async def platform_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
     return await svc.platform_activity(limit)
+
+
+
+
+@router.get("/referrals")
+async def list_referrals(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[dict[str, object]]:
+    return await svc.list_referrals(limit)
+
+
+@router.get("/referral-commissions")
+async def list_referral_commissions(
+    user: RequireAdmin, svc: AdminDep, limit: int = 200
+) -> list[dict[str, object]]:
+    return await svc.list_referral_commissions(limit)
 
 
 @router.post("/bootstrap-super-admin")
