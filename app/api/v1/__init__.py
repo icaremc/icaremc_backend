@@ -18,6 +18,7 @@ from app.resources.settings.router import router as settings_router
 from app.resources.subscriptions.router import router as subscriptions_router
 from app.resources.wallets.router import router as wallets_router
 from app.resources.uploads.router import router as uploads_router
+from app.resources.sms.router import router as sms_router
 
 api_v1_router = APIRouter(prefix="/api/v1")
 
@@ -38,6 +39,7 @@ api_v1_router.include_router(admin_router)
 api_v1_router.include_router(payments_router)
 api_v1_router.include_router(push_router)
 api_v1_router.include_router(uploads_router)
+api_v1_router.include_router(sms_router)
 
 class HealthOut(BaseModel):
     status: str
