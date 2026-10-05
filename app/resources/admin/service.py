@@ -100,6 +100,91 @@ class AdminService:
         async def count(model: type[object]) -> int:
             return int((await self._repo.session.execute(select(func.count()).select_from(model))).scalar_one())
 
+        # Appointment Payments
+        appt_payments_row = (
+            await self._repo.session.execute(
+                select(func.sum(Appointment.amount_paid), func.count(Appointment.id)).where(
+                    Appointment.payment_status == "paid", Appointment.status == "completed"
+                )
+            )
+        ).one()
+        appt_payments_sum = float(appt_payments_row[0] or 0)
+        appt_payments_count = int(appt_payments_row[1] or 0)
+
+        # Doctor Earnings
+        doc_earnings_row = (
+            await self._repo.session.execute(
+                select(func.sum(WalletTransaction.amount), func.count(WalletTransaction.id)).where(
+                    WalletTransaction.type == "appointment_earning"
+                )
+            )
+        ).one()
+        doc_earnings_sum = float(doc_earnings_row[0] or 0)
+        doc_earnings_count = int(doc_earnings_row[1] or 0)
+
+        # Subscriptions
+        sub_payments_row = (
+            await self._repo.session.execute(
+                select(func.sum(AppSubscription.amount_paid), func.count(AppSubscription.id)).where(
+                    AppSubscription.status == "active"
+                )
+            )
+        ).one()
+        sub_payments_sum = float(sub_payments_row[0] or 0)
+        sub_payments_count = int(sub_payments_row[1] or 0)
+
+        # Commission
+        comm_row = (
+            await self._repo.session.execute(select(func.sum(DoctorReferralCommission.commission_amount)))
+        ).scalar_one_or_none()
+        commission_sum = float(comm_row or 0)
+
+        # Charts
+        # 1. Appointment Payments Chart
+        appt_chart_rows = (
+            await self._repo.session.execute(
+                select(func.date(Appointment.created_at), func.sum(Appointment.amount_paid))
+                .where(Appointment.payment_status == "paid", Appointment.status == "completed")
+                .group_by(func.date(Appointment.created_at))
+                .order_by(func.date(Appointment.created_at))
+            )
+        ).all()
+        appointment_payments_chart = [{"date": str(r[0]), "amount": float(r[1] or 0)} for r in appt_chart_rows]
+
+        # 2. Doctor Earnings Chart
+        doc_earnings_chart_rows = (
+            await self._repo.session.execute(
+                select(func.date(WalletTransaction.created_at), func.sum(WalletTransaction.amount))
+                .where(WalletTransaction.type == "appointment_earning")
+                .group_by(func.date(WalletTransaction.created_at))
+                .order_by(func.date(WalletTransaction.created_at))
+            )
+        ).all()
+        doctor_earnings_chart = [{"date": str(r[0]), "amount": float(r[1] or 0)} for r in doc_earnings_chart_rows]
+
+        # 3. Subscriptions Chart
+        sub_chart_rows = (
+            await self._repo.session.execute(
+                select(func.date(AppSubscription.created_at), func.sum(AppSubscription.amount_paid))
+                .where(AppSubscription.status == "active")
+                .group_by(func.date(AppSubscription.created_at))
+                .order_by(func.date(AppSubscription.created_at))
+            )
+        ).all()
+        subscription_payments_chart = [{"date": str(r[0]), "amount": float(r[1] or 0)} for r in sub_chart_rows]
+
+        # 4. Commission Chart
+        comm_chart_rows = (
+            await self._repo.session.execute(
+                select(func.date(DoctorReferralCommission.created_at), func.sum(DoctorReferralCommission.commission_amount))
+                .group_by(func.date(DoctorReferralCommission.created_at))
+                .order_by(func.date(DoctorReferralCommission.created_at))
+            )
+        ).all()
+        commission_chart = [{"date": str(r[0]), "amount": float(r[1] or 0)} for r in comm_chart_rows]
+
+        total_transactions = doc_earnings_count + sub_payments_count
+
         return {
             "profiles": await count(Profile),
             "pregnancies": await count(Pregnancy),
@@ -114,6 +199,19 @@ class AdminService:
                 ).scalar_one()
             ),
             "admin_users": await count(AdminUser),
+            "transactions_count": total_transactions,
+            "appointment_payments_sum": appt_payments_sum,
+            "appointment_payments_count": appt_payments_count,
+            "doctor_earnings_sum": doc_earnings_sum,
+            "doctor_earnings_count": doc_earnings_count,
+            "subscription_payments_sum": sub_payments_sum,
+            "subscription_payments_count": sub_payments_count,
+            "commission_sum": commission_sum,
+            "commission_growth": 0.0,
+            "appointment_payments_chart": appointment_payments_chart,
+            "doctor_earnings_chart": doctor_earnings_chart,
+            "subscription_payments_chart": subscription_payments_chart,
+            "commission_chart": commission_chart,
         }
 
     async def list_users(self, limit: int, offset: int) -> list[RowOut]:
