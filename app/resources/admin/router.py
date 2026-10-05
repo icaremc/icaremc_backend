@@ -35,6 +35,7 @@ from app.resources.admin.schemas import (
     WeekIn,
     WeekPatchIn,
     WeekTranslationIn,
+    ReferralApplyIn,
 )
 from app.resources.admin.service import AdminService
 
@@ -61,6 +62,16 @@ async def list_users(user: RequireAdmin, svc: AdminDep, limit: int = 100, offset
 @router.get("/users/{user_id}")
 async def user_detail(user_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.user_detail(user_id)
+
+
+@router.get("/users/{user_id}/referral")
+async def get_user_referral(user_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.get_user_referral(user_id)
+
+
+@router.post("/users/{user_id}/referral")
+async def apply_user_referral(user_id: UUID, body: ReferralApplyIn, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.apply_user_referral(user_id, body.code)
 
 
 @router.get("/doctors")

@@ -243,3 +243,7 @@ class ClinicalAdvicePatchIn(BaseModel):
     is_active: bool | None = None
     translations: list[ClinicalAdviceTranslationIn] | None = None
 
+
+class ReferralApplyIn(BaseModel):
+    code: str
+

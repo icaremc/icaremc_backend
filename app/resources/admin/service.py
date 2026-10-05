@@ -230,6 +230,66 @@ class AdminService:
             "children": to_rows(list(children)),
         }
 
+    async def get_user_referral(self, user_id: UUID) -> dict[str, object]:
+        profile = (await self._repo.session.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()
+        if profile is None:
+            raise not_found("User not found")
+        
+        doctor_name = None
+        if profile.referred_by_doctor_id:
+            doctor = (await self._repo.session.execute(
+                select(DoctorProfile).where(DoctorProfile.id == profile.referred_by_doctor_id)
+            )).scalar_one_or_none()
+            if doctor:
+                parts = [p for p in [doctor.first_name, doctor.last_name] if p and str(p).strip()]
+                doctor_name = " ".join(parts) if parts else None
+        
+        referral_record = None
+        if profile.referred_by_doctor_id:
+            referral_record = (await self._repo.session.execute(
+                select(DoctorReferral).where(
+                    DoctorReferral.patient_id == user_id, 
+                    DoctorReferral.doctor_id == profile.referred_by_doctor_id
+                )
+            )).scalar_one_or_none()
+
+        return {
+            "referral": {
+                "referralCodeUsed": profile.referral_code_used,
+                "referredByDoctorId": str(profile.referred_by_doctor_id) if profile.referred_by_doctor_id else None,
+                "referredByDoctorName": doctor_name,
+                "referredAt": referral_record.created_at.isoformat() if referral_record and referral_record.created_at else None,
+                "canApplyCode": profile.referred_by_doctor_id is None
+            }
+        }
+
+    async def apply_user_referral(self, user_id: UUID, code: str) -> dict[str, object]:
+        profile = (await self._repo.session.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()
+        if profile is None:
+            raise not_found("User not found")
+        if profile.referred_by_doctor_id is not None:
+            raise bad_request("User already has a referral")
+            
+        doctor = (await self._repo.session.execute(
+            select(DoctorProfile).where(DoctorProfile.referral_code == code.strip().upper())
+        )).scalar_one_or_none()
+        if doctor is None:
+            raise not_found("Doctor referral code not found")
+            
+        profile.referral_code_used = doctor.referral_code
+        profile.referred_by_doctor_id = doctor.id
+        
+        ref = DoctorReferral(patient_id=user_id, doctor_id=doctor.id, referral_code=doctor.referral_code)
+        self._repo.session.add(ref)
+        await self._repo.session.flush()
+        
+        res = await self.get_user_referral(user_id)
+        res["applied"] = {
+            "referralCode": doctor.referral_code,
+            "doctorId": str(doctor.id)
+        }
+        return res
+
     async def list_doctors(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(DoctorProfile))).scalars().all()))
 
