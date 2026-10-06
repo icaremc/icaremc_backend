@@ -404,12 +404,24 @@ class AdminService:
             raise not_found()
         return {"appointment": require_row(row), "conversation": None, "messages": []}
 
-    async def list_children(self, limit: int = 200) -> list[RowOut]:
+    async def list_children(self, limit: int = 200) -> dict[str, object]:
         cap = max(1, min(limit, 500))
         rows = (
-            await self._repo.session.execute(select(Child).order_by(Child.created_at.desc()).limit(cap))
-        ).scalars().all()
-        return to_rows(list(rows))
+            await self._repo.session.execute(
+                select(Child, Profile)
+                .join(Profile, Child.user_id == Profile.id)
+                .order_by(Child.created_at.desc())
+                .limit(cap)
+            )
+        ).all()
+        
+        children = []
+        for child, profile in rows:
+            child_dict = require_row(child).model_dump()
+            child_dict["profiles"] = require_row(profile).model_dump()
+            children.append(child_dict)
+            
+        return {"children": children}
 
     async def get_child(self, child_id: UUID) -> RowOut:
         row = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
@@ -1223,6 +1235,27 @@ class AdminService:
             )
         ).scalars().all()
         return to_rows(list(rows))
+
+    async def activity_logs(self, source: str, limit: int, offset: int = 0) -> dict[str, object]:
+        if source == "platform":
+            total = (await self._repo.session.execute(select(func.count()).select_from(PlatformActivityLog))).scalar_one()
+            rows = (
+                await self._repo.session.execute(select(PlatformActivityLog).order_by(PlatformActivityLog.created_at.desc()).limit(limit).offset(offset))
+            ).scalars().all()
+        else:
+            total = (await self._repo.session.execute(select(func.count()).select_from(AdminActivityLog))).scalar_one()
+            rows = (
+                await self._repo.session.execute(select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc()).limit(limit).offset(offset))
+            ).scalars().all()
+            
+        return {
+            "logs": [require_row(r).model_dump() for r in rows],
+            "pagination": {
+                "total": int(total),
+                "offset": offset,
+                "limit": limit
+            }
+        }
 
     async def doctor_wallet(self, doctor_id: UUID, limit: int = 100) -> dict[str, object]:
         doctor = (

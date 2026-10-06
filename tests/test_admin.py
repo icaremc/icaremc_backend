@@ -90,7 +90,9 @@ def test_admin_membership_grant_revoke(client, admin_auth, patient_auth):
 
 def test_admin_activity_and_requires_auth(client, admin_auth):
     h = auth_header(admin_auth["token"])
-    assert client.get("/api/v1/admin/activity/admin", headers=h).status_code == 200
+    res = client.get("/api/v1/admin/activity-logs", headers=h)
+    assert res.status_code == 200
+    assert isinstance(res.json().get("logs"), list)
     assert client.get("/api/v1/admin/dashboard").status_code == 401
 
 
@@ -407,7 +409,9 @@ def test_admin_list_children(client, admin_auth):
     h = auth_header(admin_auth["token"])
     res = client.get("/api/v1/admin/children", headers=h)
     assert res.status_code == 200
-    assert isinstance(res.json(), list)
+    data = res.json()
+    assert "children" in data
+    assert isinstance(data["children"], list)
 
 
 def test_admin_get_child_not_found(client, admin_auth):

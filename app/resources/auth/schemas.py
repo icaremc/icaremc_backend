@@ -1,3 +1,4 @@
+from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -69,3 +70,16 @@ class MeOut(BaseModel):
 
 class PhoneTakenOut(BaseModel):
     taken: bool
+
+
+class SessionUserOut(BaseModel):
+    id: UUID
+    email: str | None = None
+    name: str | None = None
+    adminRole: str | None = None
+
+
+class SessionOut(BaseModel):
+    mode: str = "backend"
+    token: str | None = None
+    user: SessionUserOut

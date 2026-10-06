@@ -3,7 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.core.security.deps import RequireAny
+from app.core.security.deps import RequireAny, bearer
+from app.persistence.sqlalchemy.deps import DbDep
+from app.persistence.sqlalchemy.models import AdminUser, DoctorProfile, Profile, User
+from sqlalchemy import select
 from app.resources.auth.deps import AuthServiceDep
 from app.resources.errors import AppError
 from app.resources.auth.schemas import (
@@ -17,6 +20,8 @@ from app.resources.auth.schemas import (
     PhoneTakenOut,
     RefreshBody,
     ResetBody,
+    SessionOut,
+    SessionUserOut,
     TokenOut,
 )
 
@@ -106,3 +111,43 @@ async def phone_taken(
     role: Annotated[str | None, Query()] = None,
 ) -> PhoneTakenOut:
     return PhoneTakenOut(taken=await svc.phone_taken(phone, role=role))
+
+
+@router.get("/session")
+async def session(
+    user: RequireAny,
+    token: Annotated[str | None, Depends(bearer)],
+    db: DbDep,
+) -> SessionOut:
+    email = None
+    name = "User"
+    
+    if user.role == "admin":
+        admin = (await db.execute(select(AdminUser).where(AdminUser.id == user.id))).scalar_one_or_none()
+        if admin:
+            email = admin.email
+            name = admin.full_name or "Admin"
+    elif user.role == "doctor":
+        doctor = (await db.execute(select(DoctorProfile).where(DoctorProfile.id == user.id))).scalar_one_or_none()
+        if doctor:
+            name = f"{doctor.first_name} {doctor.last_name}"
+    else:
+        profile = (await db.execute(select(Profile).where(Profile.id == user.id))).scalar_one_or_none()
+        if profile and profile.full_name:
+            name = profile.full_name
+            
+    if not email:
+        user_record = (await db.execute(select(User).where(User.id == user.id))).scalar_one_or_none()
+        if user_record and user_record.email:
+            email = user_record.email
+
+    return SessionOut(
+        mode="backend",
+        token=token,
+        user=SessionUserOut(
+            id=user.id,
+            email=email or "",
+            name=name,
+            adminRole=user.admin_role
+        )
+    )

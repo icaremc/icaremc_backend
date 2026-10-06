@@ -8,6 +8,7 @@ from app.core.security.deps import RequireAdmin
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
+    ActivityLogsOut,
     AdminCreateIn,
     AdminPatchIn,
     AppointmentStatusIn,
@@ -131,7 +132,7 @@ async def get_appointment(appointment_id: UUID, user: RequireAdmin, svc: AdminDe
 
 
 @router.get("/children")
-async def list_children(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[RowOut]:
+async def list_children(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> dict[str, object]:
     return await svc.list_children(limit)
 
 
@@ -422,6 +423,13 @@ async def admin_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) ->
 @router.get("/activity/platform")
 async def platform_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
     return await svc.platform_activity(limit)
+
+
+@router.get("/activity-logs")
+async def activity_logs(
+    user: RequireAdmin, svc: AdminDep, source: str = "all", limit: int = 100, offset: int = 0
+) -> ActivityLogsOut:
+    return ActivityLogsOut(**await svc.activity_logs(source, limit, offset))
 
 
 

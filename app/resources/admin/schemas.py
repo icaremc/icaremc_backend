@@ -1,6 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -246,4 +247,31 @@ class ClinicalAdvicePatchIn(BaseModel):
 
 class ReferralApplyIn(BaseModel):
     code: str
+
+
+class ActivityLogItemOut(BaseModel):
+    id: UUID
+    actor_id: UUID | None = None
+    actor_email: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    actor_type: str | None = None
+    event_type: str
+    event_label: str
+    resource_type: str | None = None
+    resource_id: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+
+
+class PaginationOut(BaseModel):
+    total: int
+    offset: int
+    limit: int
+
+
+class ActivityLogsOut(BaseModel):
+    logs: list[ActivityLogItemOut]
+    pagination: PaginationOut
 
