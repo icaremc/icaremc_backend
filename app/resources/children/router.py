@@ -25,6 +25,11 @@ async def list_children(user: RequirePatient, svc: ChildrenServiceDep) -> list[R
     return await svc.list_children(user.id)
 
 
+@router.get("/children/{child_id}")
+async def get_child(child_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
+    return await svc.get_child(child_id, user.id)
+
+
 @router.post("/children")
 async def create_child(body: ChildIn, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
     return await svc.create_child(user.id, body)

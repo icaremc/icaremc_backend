@@ -141,6 +141,11 @@ async def get_child(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut
     return await svc.get_child(child_id)
 
 
+@router.get("/settings")
+async def list_settings(user: RequireAdmin, svc: AdminDep) -> list[str]:
+    return await svc.list_setting_keys()
+
+
 @router.get("/settings/{setting_id}")
 async def get_setting(setting_id: str, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.get_setting(setting_id)
@@ -162,7 +167,7 @@ async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdm
 
 
 @router.get("/wallet-transactions")
-async def wallet_transactions(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
+async def wallet_transactions(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> dict[str, object]:
     return await svc.wallet_transactions(limit)
 
 
@@ -398,6 +403,12 @@ async def legal_docs(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
 @router.put("/legal-documents")
 async def upsert_legal(body: LegalIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
     return await svc.upsert_legal(body)
+
+
+@router.patch("/legal-documents")
+async def patch_legal_docs(body: LegalIn, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    row = await svc.upsert_legal(body)
+    return {"document": row.model_dump()}
 
 
 @router.get("/documents")

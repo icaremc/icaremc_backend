@@ -429,6 +429,10 @@ class AdminService:
             raise not_found()
         return require_row(row)
 
+    async def list_setting_keys(self) -> list[str]:
+        keys = (await self._repo.session.execute(select(AppSetting.id))).scalars().all()
+        return list(keys)
+
     async def get_setting(self, setting_id: str) -> dict[str, object]:
         row = (await self._repo.session.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
         return {"id": setting_id, "data": row.data if row else {}}
@@ -486,11 +490,23 @@ class AdminService:
         await self._repo.session.flush()
         return require_row(req)
 
-    async def wallet_transactions(self, limit: int) -> list[RowOut]:
+    async def wallet_transactions(self, limit: int) -> dict[str, object]:
         rows = (
-            await self._repo.session.execute(select(WalletTransaction).order_by(WalletTransaction.created_at.desc()).limit(limit))
-        ).scalars().all()
-        return to_rows(list(rows))
+            await self._repo.session.execute(
+                select(WalletTransaction, DoctorProfile)
+                .join(DoctorProfile, WalletTransaction.doctor_id == DoctorProfile.id)
+                .order_by(WalletTransaction.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+        
+        transactions = []
+        for wt, dp in rows:
+            wt_dict = require_row(wt).model_dump()
+            wt_dict["doctor_profiles"] = {"first_name": dp.first_name, "last_name": dp.last_name}
+            transactions.append(wt_dict)
+            
+        return {"transactions": transactions}
 
     async def grant_membership(self, body: SubscriptionGrantIn) -> RowOut:
         now = datetime.now(UTC)
@@ -1190,7 +1206,13 @@ class AdminService:
         return require_row(row)
 
     async def documents(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(AdminDocument))).scalars().all()))
+        rows = list((await self._repo.session.execute(select(AdminDocument))).scalars().all())
+        result = []
+        for row in rows:
+            data = require_row(row).model_dump()
+            data["preview_url"] = row.storage_path
+            result.append(RowOut.model_validate(data))
+        return result
 
     async def create_document(self, body: DocumentIn, admin: AuthUser) -> RowOut:
         row = AdminDocument(

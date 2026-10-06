@@ -20,6 +20,12 @@ class ChildrenService:
     async def list_children(self, user_id: UUID) -> list[RowOut]:
         return to_rows(await self._repo.list_children(user_id))
 
+    async def get_child(self, child_id: UUID, user_id: UUID) -> RowOut:
+        row = await self._repo.get_child(child_id, user_id)
+        if row is None:
+            raise not_found()
+        return require_row(row)
+
     async def create_child(self, user_id: UUID, body: ChildIn) -> RowOut:
         row = Child(user_id=user_id, **body.model_dump())
         self._repo.add(row)
