@@ -220,7 +220,7 @@ class AdminService:
         }
 
     async def list_users(self, limit: int, offset: int) -> list[RowOut]:
-        rows = (await self._repo.session.execute(select(Profile).offset(offset).limit(limit))).scalars().all()
+        rows = (await self._repo.session.execute(select(Profile).order_by(Profile.created_at.desc()).offset(offset).limit(limit))).scalars().all()
         return to_rows(list(rows))
 
     async def user_detail(self, user_id: UUID) -> dict[str, object]:
@@ -296,7 +296,7 @@ class AdminService:
         return res
 
     async def list_doctors(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(DoctorProfile))).scalars().all()))
+        return to_rows(list((await self._repo.session.execute(select(DoctorProfile).order_by(DoctorProfile.created_at.desc()))).scalars().all()))
 
     async def list_doctor_services(self, doctor_id: UUID) -> list[RowOut]:
         rows = (
@@ -607,7 +607,7 @@ class AdminService:
         return to_rows(list(rows))
 
     async def list_admins(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(AdminUser))).scalars().all()))
+        return to_rows(list((await self._repo.session.execute(select(AdminUser).order_by(AdminUser.created_at.desc()))).scalars().all()))
 
     async def create_admin(self, body: AdminCreateIn, actor: AuthUser) -> dict[str, str]:
         if actor.admin_role != "super_admin":
@@ -642,7 +642,7 @@ class AdminService:
         return require_row(row)
 
     async def list_hospitals(self) -> list[RowOut]:
-        return to_rows(list((await self._repo.session.execute(select(Hospital))).scalars().all()))
+        return to_rows(list((await self._repo.session.execute(select(Hospital).order_by(Hospital.created_at.desc()))).scalars().all()))
 
     async def create_hospital(self, body: HospitalIn) -> RowOut:
         row = Hospital(**body.model_dump())
