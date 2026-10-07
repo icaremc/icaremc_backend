@@ -39,6 +39,8 @@ from app.persistence.sqlalchemy.models import (
     PregnancyWeek,
     PregnancyWeekTranslation,
     Profile,
+    SymptomCatalog,
+    VaccineDoseSchedule,
     WalletTransaction,
 )
 from app.resources.admin.repository import AdminRepository
@@ -483,6 +485,14 @@ class AdminService:
                 .order_by(ChildVaccineRecord.created_at.desc())
             )
         ).scalars().all()
+        return to_rows(list(rows))
+
+    async def vaccine_schedule(self) -> list[RowOut]:
+        rows = (await self._repo.session.execute(select(VaccineDoseSchedule))).scalars().all()
+        return to_rows(list(rows))
+        
+    async def symptoms(self) -> list[RowOut]:
+        rows = (await self._repo.session.execute(select(SymptomCatalog))).scalars().all()
         return to_rows(list(rows))
 
     async def list_setting_keys(self) -> list[str]:

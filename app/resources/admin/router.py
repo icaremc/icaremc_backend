@@ -424,6 +424,16 @@ async def delete_followup_template(
     await svc.delete_followup_template(template_id)
 
 
+@content_router.get("/vaccine-schedule")
+async def vaccine_schedule(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.vaccine_schedule()
+
+
+@content_router.get("/symptoms")
+async def symptoms(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.symptoms()
+
+
 @legal_docs_router.get("/legal-documents")
 async def legal_docs(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.legal_docs()
