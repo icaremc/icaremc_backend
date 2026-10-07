@@ -130,7 +130,7 @@ def test_admin_verify_doctor_and_list_appointments(client, admin_auth, doctor_au
     assert book.status_code == 200
     appts = client.get("/api/v1/admin/appointments", headers=h)
     assert appts.status_code == 200
-    assert any(a["id"] == book.json()["id"] for a in appts.json())
+    assert any(a["id"] == book.json()["id"] for a in appts.json()["appointments"])
 
 
 def test_admin_create_admin_and_patch_hospital(client, admin_auth):
@@ -314,7 +314,7 @@ def test_admin_patch_appointment_status(client, admin_auth, doctor_auth, patient
     # create via doctor flow if appointments exist; otherwise skip gracefully
     listed = client.get("/api/v1/admin/appointments", headers=h)
     assert listed.status_code == 200
-    rows = listed.json()
+    rows = listed.json()["appointments"]
     if not rows:
         return
     appt_id = rows[0]["id"]

@@ -367,11 +367,25 @@ class AdminService:
         await self._repo.session.flush()
         return require_row(row)
 
-    async def list_appointments(self, limit: int) -> list[RowOut]:
+    async def list_appointments(self, limit: int) -> dict[str, object]:
         rows = (
-            await self._repo.session.execute(select(Appointment).order_by(Appointment.created_at.desc()).limit(limit))
-        ).scalars().all()
-        return to_rows(list(rows))
+            await self._repo.session.execute(
+                select(Appointment, DoctorProfile, Profile)
+                .join(DoctorProfile, Appointment.doctor_id == DoctorProfile.id)
+                .join(Profile, Appointment.patient_id == Profile.id)
+                .order_by(Appointment.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+        
+        appointments = []
+        for appointment, doctor_profile, profile in rows:
+            appt_dict = require_row(appointment).model_dump()
+            appt_dict["doctor_profiles"] = require_row(doctor_profile).model_dump()
+            appt_dict["profiles"] = require_row(profile).model_dump()
+            appointments.append(appt_dict)
+            
+        return {"appointments": appointments}
 
     async def patch_appointment(self, appointment_id: UUID, body: AppointmentStatusIn, admin: AuthUser) -> RowOut:
         if body.status not in _APPOINTMENT_STATUSES:
