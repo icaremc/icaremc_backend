@@ -443,6 +443,32 @@ class AdminService:
             raise not_found()
         return require_row(row)
 
+    async def list_child_milestones(self, child_id: UUID) -> list[RowOut]:
+        child = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+        if child is None:
+            raise not_found()
+        rows = (
+            await self._repo.session.execute(
+                select(ChildMilestoneCheck)
+                .where(ChildMilestoneCheck.user_id == child.user_id, ChildMilestoneCheck.child_local_id == child.local_id)
+                .order_by(ChildMilestoneCheck.created_at.desc())
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
+
+    async def list_child_vaccines(self, child_id: UUID) -> list[RowOut]:
+        child = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+        if child is None:
+            raise not_found()
+        rows = (
+            await self._repo.session.execute(
+                select(ChildVaccineRecord)
+                .where(ChildVaccineRecord.user_id == child.user_id, ChildVaccineRecord.child_local_id == child.local_id)
+                .order_by(ChildVaccineRecord.created_at.desc())
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
+
     async def list_setting_keys(self) -> list[str]:
         keys = (await self._repo.session.execute(select(AppSetting.id))).scalars().all()
         return list(keys)
