@@ -155,6 +155,21 @@ async def get_child(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> RowOut
     return await svc.get_child(child_id)
 
 
+@children_router.get("/children/{child_id}/measurements")
+async def list_child_measurements(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_child_measurements(child_id)
+
+
+@children_router.get("/children/{child_id}/milestones")
+async def list_child_milestones(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_child_milestones(child_id)
+
+
+@children_router.get("/children/{child_id}/vaccines")
+async def list_child_vaccines(child_id: UUID, user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_child_vaccines(child_id)
+
+
 @settings_router.get("/settings")
 async def list_settings(user: RequireAdmin, svc: AdminDep) -> list[str]:
     return await svc.list_setting_keys()

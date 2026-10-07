@@ -14,8 +14,11 @@ from app.persistence.sqlalchemy.models import (
     AppSubscription,
     Child,
     ChildFollowupVisitTemplate,
+    ChildGrowthMeasurement,
     ChildGrowthPeriod,
     ChildGrowthPeriodTranslation,
+    ChildMilestoneCheck,
+    ChildVaccineRecord,
     GrowthClinicalAdvice,
     GrowthClinicalAdviceTranslation,
     DailyTip,
@@ -442,6 +445,19 @@ class AdminService:
         if row is None:
             raise not_found()
         return require_row(row)
+
+    async def list_child_measurements(self, child_id: UUID) -> list[RowOut]:
+        child = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+        if child is None:
+            raise not_found()
+        rows = (
+            await self._repo.session.execute(
+                select(ChildGrowthMeasurement)
+                .where(ChildGrowthMeasurement.user_id == child.user_id, ChildGrowthMeasurement.child_local_id == child.local_id)
+                .order_by(ChildGrowthMeasurement.created_at.desc())
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
 
     async def list_child_milestones(self, child_id: UUID) -> list[RowOut]:
         child = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
