@@ -39,6 +39,8 @@ from app.persistence.sqlalchemy.models import (
     PregnancyWeek,
     PregnancyWeekTranslation,
     Profile,
+    PatientWallet,
+    PatientWalletTransaction,
     SymptomCatalog,
     VaccineDoseSchedule,
     WalletTransaction,
@@ -70,6 +72,7 @@ from app.resources.admin.schemas import (
     PayoutActionIn,
     SettingIn,
     SubscriptionGrantIn,
+    WalletBalancePatchIn,
     WeekIn,
     WeekPatchIn,
     WeekTranslationIn,
@@ -294,6 +297,34 @@ class AdminService:
             "doctorId": str(doctor.id)
         }
         return res
+
+    async def patch_user_wallet(self, user_id: UUID, body: WalletBalancePatchIn, admin: AuthUser) -> dict[str, object]:
+        profile = (await self._repo.session.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()
+        if profile is None:
+            raise not_found("User not found")
+            
+        wallet = (await self._repo.session.execute(select(PatientWallet).where(PatientWallet.patient_id == user_id))).scalar_one_or_none()
+        if wallet is None:
+            wallet = PatientWallet(patient_id=user_id, balance=body.balance)
+            self._repo.session.add(wallet)
+            amount_diff = body.balance
+        else:
+            amount_diff = body.balance - wallet.balance
+            wallet.balance = body.balance
+            
+        if amount_diff != 0:
+            tx = PatientWalletTransaction(
+                patient_id=user_id,
+                amount=abs(amount_diff),
+                is_credit=amount_diff > 0,
+                type="admin_adjustment",
+            )
+            self._repo.session.add(tx)
+            
+        await self._log(admin, "user.wallet_update", "Admin updated user wallet balance", user_id=str(user_id), new_balance=float(body.balance))
+        await self._repo.session.flush()
+        
+        return require_row(wallet).model_dump()
 
     async def list_doctors(self) -> list[RowOut]:
         return to_rows(list((await self._repo.session.execute(select(DoctorProfile).order_by(DoctorProfile.created_at.desc()))).scalars().all()))

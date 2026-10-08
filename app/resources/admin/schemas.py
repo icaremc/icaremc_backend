@@ -9,6 +9,10 @@ class SettingIn(BaseModel):
     data: dict[str, object]
 
 
+class WalletBalancePatchIn(BaseModel):
+    balance: Decimal
+
+
 class DoctorVerifyIn(BaseModel):
     is_verified: bool
 

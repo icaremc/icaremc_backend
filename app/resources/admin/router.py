@@ -33,6 +33,7 @@ from app.resources.admin.schemas import (
     PayoutActionIn,
     SettingIn,
     SubscriptionGrantIn,
+    WalletBalancePatchIn,
     WeekIn,
     WeekPatchIn,
     WeekTranslationIn,
@@ -87,6 +88,11 @@ async def get_user_referral(user_id: UUID, user: RequireAdmin, svc: AdminDep) ->
 @users_router.post("/users/{user_id}/referral")
 async def apply_user_referral(user_id: UUID, body: ReferralApplyIn, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.apply_user_referral(user_id, body.code)
+
+
+@users_router.patch("/users/{user_id}/wallet")
+async def patch_user_wallet(user_id: UUID, body: WalletBalancePatchIn, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.patch_user_wallet(user_id, body, user)
 
 
 @doctors_router.get("/doctors")
