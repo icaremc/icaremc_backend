@@ -6,10 +6,13 @@ from uuid import UUID
 
 import jwt
 from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
 
 from app.config import MySettings
 
-_password_hash = PasswordHash.recommended()
+_password_hash = PasswordHash((Argon2Hasher(), BcryptHasher()))
 
 
 def hash_password(password: str) -> str:
@@ -17,7 +20,17 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return _password_hash.verify(password, password_hash)
+    try:
+        return _password_hash.verify(password, password_hash)
+    except (UnknownHashError, ValueError):
+        return False
+
+
+def verify_and_update_password(password: str, password_hash: str) -> tuple[bool, str | None]:
+    try:
+        return _password_hash.verify_and_update(password, password_hash)
+    except (UnknownHashError, ValueError):
+        return False, None
 
 
 def create_access_token(*, sub: UUID, role: str, extra: dict[str, Any] | None = None) -> str:

@@ -25,7 +25,7 @@ Flutter (`mc-app`, `mc-doctor-app`) and `icaremc-admin` stop using Supabase Auth
 
 ## Password migration
 
-Supabase Auth hashes are not portable to this Argon2 store. Migration creates `users` rows with a random unusable hash and sets `must_reset` via forcing password OTP on first login (clients should treat 401 + `password_reset_required` once that flag is added). Until then: broadcast reset-OTP flow.
+The backend supports dual hashing via `pwdlib` (`Argon2id` as default + `Bcrypt` for legacy Supabase compatibility). Migrated Supabase accounts (`$2a$10$...`) can log in immediately with their existing passwords. Upon first successful login, their password hash is automatically and transparently upgraded to `Argon2id` in the database. New accounts are hashed with `Argon2id` directly.
 
 ## Schema ownership
 

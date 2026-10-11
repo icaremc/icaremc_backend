@@ -16,3 +16,10 @@ project_structure_guide.md
 static/uploads/
 local_files/
 *.sql
+check_storage_delta.sh
+migrate_storage.py
+supabase-image-backup.zip
+sync_supabase_to_pg.py
+verify_hash_demo.py
+hash_password_tool.py
+syn

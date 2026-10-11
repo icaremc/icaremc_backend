@@ -4,7 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.security.tokens import create_access_token, hash_password, verify_password
+from app.core.security.tokens import (
+    create_access_token,
+    hash_password,
+    verify_and_update_password,
+    verify_password,
+)
 from app.core.services.booking_finance import cancel_appointment, credit_doctor_on_complete
 from app.core.services.sms_otp import normalize_phone
 from app.persistence.sqlalchemy.connection import async_session_factory
@@ -25,8 +30,34 @@ def test_normalize_phone():
 
 def test_password_hash_roundtrip():
     hashed = hash_password("abc12345")
+    assert hashed.startswith("$argon2id$")
     assert verify_password("abc12345", hashed)
     assert not verify_password("nope", hashed)
+
+
+def test_legacy_bcrypt_verification_and_upgrade():
+    import bcrypt
+
+    raw_password = "mySecretPassword123!"
+    legacy_hash = bcrypt.hashpw(raw_password.encode(), bcrypt.gensalt()).decode()
+    assert legacy_hash.startswith(("$2a$", "$2b$"))
+
+    # Can verify directly
+    assert verify_password(raw_password, legacy_hash)
+    assert not verify_password("wrong_password", legacy_hash)
+
+    # verify_and_update verifies and returns new argon2 hash
+    valid, updated_hash = verify_and_update_password(raw_password, legacy_hash)
+    assert valid is True
+    assert updated_hash is not None
+    assert updated_hash.startswith("$argon2id$")
+    # Newly upgraded hash verifies correctly
+    assert verify_password(raw_password, updated_hash)
+
+    # Calling verify_and_update on an already up-to-date Argon2 hash should not rehash
+    valid_again, no_update = verify_and_update_password(raw_password, updated_hash)
+    assert valid_again is True
+    assert no_update is None
 
 
 def test_jwt_contains_role():

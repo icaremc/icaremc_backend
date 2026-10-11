@@ -8,6 +8,7 @@ from app.core.security.tokens import (
     hash_password,
     hash_refresh_token,
     new_refresh_token,
+    verify_and_update_password,
     verify_password,
 )
 from app.core.services.roles import ensure_roles, has_role, roles_of
@@ -208,8 +209,14 @@ class AuthService:
     async def login(self, *, phone: str, password: str, expected_role: str | None = None) -> dict:
         phone = normalize_phone(phone)
         user = await self._repo.get_user_by_phone(phone)
-        if user is None or not verify_password(password, user.password_hash):
+        if user is None:
             raise unauthorized("Invalid credentials")
+        valid, updated_hash = verify_and_update_password(password, user.password_hash)
+        if not valid:
+            raise unauthorized("Invalid credentials")
+        if updated_hash:
+            user.password_hash = updated_hash
+            await self._repo.flush()
         if expected_role and not has_role(user, expected_role):
             raise unauthorized(f"Not a {expected_role} account")
         active_role = expected_role or user.role
@@ -224,8 +231,14 @@ class AuthService:
         if admin is None:
             raise unauthorized("Invalid credentials")
         user = await self._repo.get_user(admin.id)
-        if user is None or not verify_password(password, user.password_hash):
+        if user is None:
             raise unauthorized("Invalid credentials")
+        valid, updated_hash = verify_and_update_password(password, user.password_hash)
+        if not valid:
+            raise unauthorized("Invalid credentials")
+        if updated_hash:
+            user.password_hash = updated_hash
+            await self._repo.flush()
         return await self._issue_tokens(
             user, "admin", extra={"admin_role": admin.admin_role}, admin_role=admin.admin_role
         )

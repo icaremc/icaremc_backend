@@ -13,11 +13,12 @@ dependencies = [
     "asyncpg",
     "python-dotenv",
     "pyjwt>=2.13.0",
-    "pwdlib[argon2]>=0.3.1",
+    "pwdlib[argon2,bcrypt]>=0.3.1",
     "httpx>=0.28.1",
     "email-validator>=2.3.0",
     "greenlet>=3.5.5",
     "supabase>=2.31.0",
+    "psycopg2-binary>=2.9.13",
 ]
 
 [dependency-groups]
