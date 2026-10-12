@@ -68,12 +68,8 @@ class AuthService:
 
     async def phone_taken(self, phone: str, role: str | None = None) -> bool:
         phone = normalize_phone(phone)
-        user = await self._repo.get_user_by_phone(phone)
-        if user is None:
-            return False
-        if role is None:
-            return True
-        return has_role(user, role)
+        user = await self._repo.get_user_by_phone(phone, role=role)
+        return user is not None
 
     async def request_signup_otp(self, phone: str, purpose: str = "signup") -> dict:
         role = "patient" if purpose == "signup" else "doctor"
@@ -105,21 +101,14 @@ class AuthService:
         if await self.phone_taken(phone, role="patient"):
             raise bad_request("Phone already registered as patient")
 
-        existing = await self._repo.get_user_by_phone(phone)
-        if existing is not None:
-            if not verify_password(password, existing.password_hash):
-                raise bad_request("Wrong password for existing account")
-            user = existing
-            ensure_roles(user, "patient")
-        else:
-            user = User(
-                phone=phone,
-                password_hash=hash_password(password),
-                role="patient",
-                roles=["patient"],
-            )
-            self._repo.add(user)
-            await self._repo.flush()
+        user = User(
+            phone=phone,
+            password_hash=hash_password(password),
+            role="patient",
+            roles=["patient"],
+        )
+        self._repo.add(user)
+        await self._repo.flush()
 
         referred_by = None
         code_used = None
@@ -168,21 +157,14 @@ class AuthService:
         if await self.phone_taken(phone, role="doctor"):
             raise bad_request("Phone already registered as doctor")
 
-        existing = await self._repo.get_user_by_phone(phone)
-        if existing is not None:
-            if not verify_password(password, existing.password_hash):
-                raise bad_request("Wrong password for existing account")
-            user = existing
-            ensure_roles(user, "doctor")
-        else:
-            user = User(
-                phone=phone,
-                password_hash=hash_password(password),
-                role="doctor",
-                roles=["doctor"],
-            )
-            self._repo.add(user)
-            await self._repo.flush()
+        user = User(
+            phone=phone,
+            password_hash=hash_password(password),
+            role="doctor",
+            roles=["doctor"],
+        )
+        self._repo.add(user)
+        await self._repo.flush()
 
         doctor = await self._repo.get_doctor(user.id)
         if doctor is None:
@@ -208,7 +190,7 @@ class AuthService:
 
     async def login(self, *, phone: str, password: str, expected_role: str | None = None) -> dict:
         phone = normalize_phone(phone)
-        user = await self._repo.get_user_by_phone(phone)
+        user = await self._repo.get_user_by_phone(phone, role=expected_role)
         if user is None:
             raise unauthorized("Invalid credentials")
         valid, updated_hash = verify_and_update_password(password, user.password_hash)
@@ -286,17 +268,18 @@ class AuthService:
         await self._repo.revoke_all_refresh(user_id)
         await self._repo.flush()
 
-    async def request_reset_otp(self, phone: str) -> dict:
+    async def request_reset_otp(self, phone: str, role: str | None = None) -> dict:
+        phone = normalize_phone(phone)
         db = self._repo.session
         msg = "Your iCare password reset code is: {code}"
         code = await send_otp(db, phone=phone, purpose="reset", message_template=msg)
         return {"ok": True, "dev_code": code or None}
 
-    async def reset_password(self, *, phone: str, otp: str, new_password: str) -> dict:
+    async def reset_password(self, *, phone: str, otp: str, new_password: str, role: str | None = None) -> dict:
         phone = normalize_phone(phone)
         if not await verify_otp(self._repo.session, phone=phone, purpose="reset", code=otp):
             raise bad_request("Invalid OTP")
-        user = await self._repo.get_user_by_phone_not_deleted(phone)
+        user = await self._repo.get_user_by_phone_not_deleted(phone, role=role)
         if user is None:
             raise bad_request("User not found")
         user.password_hash = hash_password(new_password)

@@ -75,12 +75,16 @@ async def swagger_login(body: Annotated[OAuth2PasswordRequestForm, Depends()], s
 
 @router.post("/password/otp")
 async def password_otp(body: PhoneBody, svc: AuthServiceDep) -> OkOut:
-    return OkOut(**await svc.request_reset_otp(body.phone))
+    return OkOut(**await svc.request_reset_otp(body.phone, role=body.role))
 
 
 @router.post("/password/reset")
 async def password_reset(body: ResetBody, svc: AuthServiceDep) -> OkOut:
-    return OkOut(**await svc.reset_password(phone=body.phone, otp=body.otp, new_password=body.new_password))
+    return OkOut(
+        **await svc.reset_password(
+            phone=body.phone, otp=body.otp, new_password=body.new_password, role=body.role
+        )
+    )
 
 
 @router.post("/refresh")

@@ -30,7 +30,7 @@ def _uuid() -> uuid.UUID:
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        Index("ix_users_phone_unique", "phone", unique=True, postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_users_phone_role_unique", "phone", "role", unique=True, postgresql_where=text("deleted_at IS NULL")),
         Index("ix_users_email_unique", "email", unique=True, postgresql_where=text("deleted_at IS NULL")),
     )
 

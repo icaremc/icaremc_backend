@@ -22,10 +22,11 @@ def ensure_roles(user: User, *roles: str) -> None:
         user.role = current[0]
 
 
-async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
-    return (
-        await db.execute(select(User).where(User.phone == phone, User.deleted_at.is_(None), User.is_active.is_(True)))
-    ).scalar_one_or_none()
+async def get_user_by_phone(db: AsyncSession, phone: str, role: str | None = None) -> User | None:
+    query = select(User).where(User.phone == phone, User.deleted_at.is_(None), User.is_active.is_(True))
+    if role:
+        query = query.where(User.role == role)
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 def roles_of(user: User) -> list[str]:

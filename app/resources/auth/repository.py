@@ -17,8 +17,8 @@ from app.persistence.sqlalchemy.models import (
 class AuthRepository(Protocol):
     @property
     def session(self) -> AsyncSession: ...
-    async def get_user_by_phone(self, phone: str) -> User | None: ...
-    async def get_user_by_phone_not_deleted(self, phone: str) -> User | None: ...
+    async def get_user_by_phone(self, phone: str, role: str | None = None) -> User | None: ...
+    async def get_user_by_phone_not_deleted(self, phone: str, role: str | None = None) -> User | None: ...
     async def get_user_by_id(self, user_id: UUID) -> User | None: ...
     async def get_admin_by_email(self, email: str) -> AdminUser | None: ...
     async def get_user(self, user_id: UUID) -> User | None: ...
@@ -38,17 +38,17 @@ class SqlAlchemyAuthRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.session = db
 
-    async def get_user_by_phone(self, phone: str) -> User | None:
-        return (
-            await self.session.execute(
-                select(User).where(User.phone == phone, User.deleted_at.is_(None), User.is_active.is_(True))
-            )
-        ).scalar_one_or_none()
+    async def get_user_by_phone(self, phone: str, role: str | None = None) -> User | None:
+        query = select(User).where(User.phone == phone, User.deleted_at.is_(None), User.is_active.is_(True))
+        if role:
+            query = query.where(User.role == role)
+        return (await self.session.execute(query)).scalar_one_or_none()
 
-    async def get_user_by_phone_not_deleted(self, phone: str) -> User | None:
-        return (
-            await self.session.execute(select(User).where(User.phone == phone, User.deleted_at.is_(None)))
-        ).scalar_one_or_none()
+    async def get_user_by_phone_not_deleted(self, phone: str, role: str | None = None) -> User | None:
+        query = select(User).where(User.phone == phone, User.deleted_at.is_(None))
+        if role:
+            query = query.where(User.role == role)
+        return (await self.session.execute(query)).scalar_one_or_none()
 
     async def get_user_by_id(self, user_id: UUID) -> User | None:
         return (await self.session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()

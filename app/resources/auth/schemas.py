@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 class PhoneBody(BaseModel):
     phone: str
+    role: str | None = None
 
 
 class PatientSignup(BaseModel):
@@ -38,6 +39,7 @@ class ResetBody(BaseModel):
     phone: str
     otp: str
     new_password: str = Field(min_length=6)
+    role: str | None = None
 
 
 class TokenOut(BaseModel):
