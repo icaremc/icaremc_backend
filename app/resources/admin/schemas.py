@@ -264,6 +264,7 @@ class ActivityLogItemOut(BaseModel):
     event_label: str
     resource_type: str | None = None
     resource_id: str | None = None
+    metadata: dict | None = None
     ip_address: str | None = None
     user_agent: str | None = None
     created_at: datetime

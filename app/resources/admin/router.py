@@ -198,7 +198,7 @@ async def payout_requests(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
 
 @finance_router.post("/payout-requests/{request_id}")
 async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdmin, svc: AdminDep) -> RowOut:
-    return await svc.payout_action(request_id, body)
+    return await svc.payout_action(request_id, body, admin=user)
 
 
 @finance_router.get("/wallet-transactions")

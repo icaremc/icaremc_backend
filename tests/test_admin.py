@@ -96,6 +96,27 @@ def test_admin_activity_and_requires_auth(client, admin_auth):
     assert client.get("/api/v1/admin/dashboard").status_code == 401
 
 
+def test_admin_activity_logs_fields_populated(client, admin_auth):
+    h = auth_header(admin_auth["token"])
+    setting_res = client.put(
+        "/api/v1/admin/settings/general",
+        headers=h,
+        json={"data": {"site_name": "icare"}},
+    )
+    assert setting_res.status_code == 200
+
+    logs_res = client.get("/api/v1/admin/activity-logs", headers=h)
+    assert logs_res.status_code == 200
+    data = logs_res.json()
+    logs = data.get("logs", [])
+    assert len(logs) > 0
+    setting_log = next((l for l in logs if l["event_type"] == "settings.update"), None)
+    assert setting_log is not None
+    assert setting_log["actor_email"] is not None
+    assert setting_log["resource_type"] == "setting"
+    assert setting_log["resource_id"] == "general"
+
+
 def test_admin_verify_doctor_and_list_appointments(client, admin_auth, doctor_auth, patient_auth):
     h = auth_header(admin_auth["token"])
     doctors = client.get("/api/v1/admin/doctors", headers=h)

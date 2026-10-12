@@ -21,6 +21,8 @@ class AuthUser:
     role: str
     roles: list[str]
     admin_role: str | None = None
+    email: str | None = None
+    name: str | None = None
 
 
 async def get_current_user(
@@ -40,6 +42,8 @@ async def get_current_user(
     if user is None or not has_role(user, role):
         raise unauthorized("User not found")
     admin_role = None
+    email = user.email
+    name = None
     if role == "admin":
         admin = (
             await db.execute(select(AdminUser).where(AdminUser.id == user_id, AdminUser.is_active.is_(True)))
@@ -47,7 +51,9 @@ async def get_current_user(
         if admin is None:
             raise forbidden("Admin inactive")
         admin_role = admin.admin_role
-    return AuthUser(id=user.id, role=role, roles=roles_of(user), admin_role=admin_role)
+        email = admin.email or email
+        name = admin.full_name
+    return AuthUser(id=user.id, role=role, roles=roles_of(user), admin_role=admin_role, email=email, name=name)
 
 
 def require_roles(*roles: str):

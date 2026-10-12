@@ -42,6 +42,7 @@ from app.persistence.sqlalchemy.models import (
     PatientWallet,
     PatientWalletTransaction,
     SymptomCatalog,
+    User,
     VaccineDoseSchedule,
     WalletTransaction,
 )
@@ -93,14 +94,66 @@ class AdminService:
     def _auth(self) -> AuthService:
         return AuthService(SqlAlchemyAuthRepository(self._repo.session))
 
-    async def _log(self, admin: AuthUser, event_type: str, event_label: str, **kwargs: object) -> None:
+    async def _log(
+        self,
+        admin: AuthUser,
+        event_type: str,
+        event_label: str,
+        *,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        actor_email = admin.email
+        actor_name = admin.name
+        if (not actor_email or not actor_name) and admin.id:
+            admin_row = (
+                await self._repo.session.execute(select(AdminUser).where(AdminUser.id == admin.id))
+            ).scalar_one_or_none()
+            if admin_row:
+                actor_email = actor_email or admin_row.email
+                actor_name = actor_name or admin_row.full_name
+            if not actor_email:
+                user_row = (
+                    await self._repo.session.execute(select(User).where(User.id == admin.id))
+                ).scalar_one_or_none()
+                if user_row:
+                    actor_email = user_row.email
+
+        if not resource_type:
+            for candidate_key, rtype in [
+                ("appointment_id", "appointment"),
+                ("doctor_id", "doctor"),
+                ("user_id", "user"),
+                ("admin_id", "admin"),
+                ("setting_id", "setting"),
+                ("document_id", "document"),
+                ("payout_request_id", "payout_request"),
+                ("request_id", "payout_request"),
+            ]:
+                if candidate_key in kwargs:
+                    resource_type = rtype
+                    if not resource_id:
+                        resource_id = str(kwargs[candidate_key])
+                    break
+            if not resource_type and "." in event_type:
+                resource_type = event_type.split(".", 1)[0]
+
         self._repo.session.add(
             AdminActivityLog(
                 actor_id=admin.id,
+                actor_email=actor_email,
+                actor_name=actor_name,
                 actor_role=admin.admin_role,
                 event_type=event_type,
                 event_label=event_label,
+                resource_type=resource_type,
+                resource_id=resource_id,
                 metadata_=kwargs or {},
+                ip_address=ip_address,
+                user_agent=user_agent,
             )
         )
 
@@ -541,7 +594,14 @@ class AdminService:
             self._repo.session.add(row)
         else:
             row.data = body.data
-        await self._log(admin, "settings.update", f"Updated {setting_id}")
+        await self._log(
+            admin,
+            "settings.update",
+            f"Updated {setting_id}",
+            resource_type="setting",
+            resource_id=setting_id,
+            setting_id=setting_id,
+        )
         await self._repo.session.flush()
         return {"id": setting_id, "data": row.data}
 
@@ -551,7 +611,7 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
-    async def payout_action(self, request_id: UUID, body: PayoutActionIn) -> RowOut:
+    async def payout_action(self, request_id: UUID, body: PayoutActionIn, admin: AuthUser | None = None) -> RowOut:
         req = (
             await self._repo.session.execute(select(DoctorPayoutRequest).where(DoctorPayoutRequest.id == request_id))
         ).scalar_one_or_none()
@@ -584,6 +644,18 @@ class AdminService:
             req.payment_date = datetime.now(UTC)
         req.status = body.status
         req.admin_note = body.admin_note
+        if admin is not None:
+            await self._log(
+                admin,
+                "payout.action",
+                f"Payout request {body.status}",
+                resource_type="payout_request",
+                resource_id=str(request_id),
+                request_id=str(request_id),
+                status=body.status,
+                doctor_id=str(req.doctor_id),
+                amount=float(req.amount),
+            )
         await self._repo.session.flush()
         return require_row(req)
 
@@ -645,6 +717,16 @@ class AdminService:
             raise forbidden("super_admin required")
         admin_id = await self._auth().ensure_admin(
             email=body.email, password=body.password, full_name=body.full_name, admin_role=body.admin_role
+        )
+        await self._log(
+            actor,
+            "admin.create",
+            "Admin user created",
+            resource_type="admin",
+            resource_id=str(admin_id),
+            created_admin_id=str(admin_id),
+            email=body.email,
+            admin_role=body.admin_role,
         )
         return {"id": str(admin_id)}
 
@@ -1366,9 +1448,69 @@ class AdminService:
             rows = (
                 await self._repo.session.execute(select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc()).limit(limit).offset(offset))
             ).scalars().all()
-            
+
+        actor_ids = [r.actor_id for r in rows if r.actor_id and (not getattr(r, "actor_email", None) or not getattr(r, "actor_name", None))]
+        admins_map = {}
+        users_map = {}
+        if actor_ids:
+            admins_map = {
+                a.id: a
+                for a in (
+                    await self._repo.session.execute(
+                        select(AdminUser).where(AdminUser.id.in_(actor_ids))
+                    )
+                ).scalars().all()
+            }
+            users_map = {
+                u.id: u
+                for u in (
+                    await self._repo.session.execute(
+                        select(User).where(User.id.in_(actor_ids))
+                    )
+                ).scalars().all()
+            }
+
+        logs_data: list[dict[str, object]] = []
+        for r in rows:
+            data = require_row(r).model_dump()
+            if not data.get("actor_email") and r.actor_id:
+                admin_obj = admins_map.get(r.actor_id)
+                user_obj = users_map.get(r.actor_id)
+                data["actor_email"] = (admin_obj.email if admin_obj else None) or (user_obj.email if user_obj else None)
+            if not data.get("actor_name") and r.actor_id:
+                admin_obj = admins_map.get(r.actor_id)
+                data["actor_name"] = admin_obj.full_name if admin_obj else None
+
+            if not data.get("resource_type") or not data.get("resource_id"):
+                meta = getattr(r, "metadata_", None) or data.get("metadata") or {}
+                if isinstance(meta, dict):
+                    res_type = data.get("resource_type")
+                    res_id = data.get("resource_id")
+                    for k, t in [
+                        ("appointment_id", "appointment"),
+                        ("doctor_id", "doctor"),
+                        ("user_id", "user"),
+                        ("admin_id", "admin"),
+                        ("setting_id", "setting"),
+                        ("document_id", "document"),
+                        ("payout_request_id", "payout_request"),
+                        ("request_id", "payout_request"),
+                    ]:
+                        if k in meta:
+                            if not res_type:
+                                res_type = t
+                            if not res_id:
+                                res_id = str(meta[k])
+                            break
+                    if not res_type and r.event_type and "." in r.event_type:
+                        res_type = r.event_type.split(".", 1)[0]
+                    data["resource_type"] = res_type
+                    data["resource_id"] = res_id
+
+            logs_data.append(data)
+
         return {
-            "logs": [require_row(r).model_dump() for r in rows],
+            "logs": logs_data,
             "pagination": {
                 "total": int(total),
                 "offset": offset,

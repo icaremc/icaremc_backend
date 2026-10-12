@@ -22,4 +22,4 @@ supabase-image-backup.zip
 sync_supabase_to_pg.py
 verify_hash_demo.py
 hash_password_tool.py
-syn
+sync_user_phones.py
