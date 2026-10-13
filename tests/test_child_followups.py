@@ -124,3 +124,57 @@ def test_child_creation_auto_generates_followup_visits(client, patient_auth):
     )
     assert backfill_res.status_code == 200
     assert len(backfill_res.json()) == 2
+
+
+def test_delete_child(client, patient_auth):
+    h = auth_header(patient_auth["token"])
+    create_res = client.post(
+        "/api/v1/children",
+        headers=h,
+        json={
+            "local_id": "baby-del-test",
+            "name": "To Delete",
+            "gender": "male",
+            "birth_date": "2026-01-01",
+        },
+    )
+    assert create_res.status_code == 200
+    child_id = create_res.json()["id"]
+
+    # Add measurement, milestone, vaccine
+    m = client.post(
+        "/api/v1/child-measurements",
+        headers=h,
+        json={"child_local_id": "baby-del-test", "weight_kg": 4.5, "height_cm": 52},
+    )
+    assert m.status_code == 200
+
+    ms = client.post(
+        "/api/v1/child-milestones",
+        headers=h,
+        json={"child_local_id": "baby-del-test", "item_key": "smile"},
+    )
+    assert ms.status_code == 200
+
+    v = client.post(
+        "/api/v1/child-vaccines",
+        headers=h,
+        json={"child_local_id": "baby-del-test", "vaccine_key": "bcg", "vaccine_name": "BCG"},
+    )
+    assert v.status_code == 200
+
+    # Delete child
+    del_res = client.delete(f"/api/v1/children/{child_id}", headers=h)
+    assert del_res.status_code == 200
+
+    # Child is gone
+    get_res = client.get(f"/api/v1/children/{child_id}", headers=h)
+    assert get_res.status_code == 404
+
+    # All sub-records are cleaned up
+    assert client.get("/api/v1/child-measurements", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
+    assert client.get("/api/v1/child-milestones", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
+    assert client.get("/api/v1/child-vaccines", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
+    assert client.get("/api/v1/child-followups", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
+
+

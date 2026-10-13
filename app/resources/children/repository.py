@@ -1,7 +1,7 @@
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.persistence.sqlalchemy.models import (
@@ -11,6 +11,7 @@ from app.persistence.sqlalchemy.models import (
     ChildGrowthMeasurement,
     ChildMilestoneCheck,
     ChildVaccineRecord,
+    ChildVaccineReminderLog,
 )
 
 
@@ -23,8 +24,9 @@ class ChildrenRepository(Protocol):
     async def get_vaccine(self, user_id: UUID, child_local_id: str, vaccine_key: str) -> ChildVaccineRecord | None: ...
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[ChildFollowupVisit]: ...
     async def list_published_followup_templates(self) -> list[ChildFollowupVisitTemplate]: ...
+    async def delete_child_associated_data(self, user_id: UUID, child_local_id: str) -> None: ...
     def add(self, obj: object) -> None: ...
-    def delete(self, obj: object) -> None: ...
+    async def delete(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
 
 
@@ -120,11 +122,43 @@ class SqlAlchemyChildrenRepository:
             .all()
         )
 
+    async def delete_child_associated_data(self, user_id: UUID, child_local_id: str) -> None:
+        await self._db.execute(
+            delete(ChildFollowupVisit).where(
+                ChildFollowupVisit.user_id == user_id,
+                ChildFollowupVisit.child_local_id == child_local_id,
+            )
+        )
+        await self._db.execute(
+            delete(ChildGrowthMeasurement).where(
+                ChildGrowthMeasurement.user_id == user_id,
+                ChildGrowthMeasurement.child_local_id == child_local_id,
+            )
+        )
+        await self._db.execute(
+            delete(ChildMilestoneCheck).where(
+                ChildMilestoneCheck.user_id == user_id,
+                ChildMilestoneCheck.child_local_id == child_local_id,
+            )
+        )
+        await self._db.execute(
+            delete(ChildVaccineRecord).where(
+                ChildVaccineRecord.user_id == user_id,
+                ChildVaccineRecord.child_local_id == child_local_id,
+            )
+        )
+        await self._db.execute(
+            delete(ChildVaccineReminderLog).where(
+                ChildVaccineReminderLog.user_id == user_id,
+                ChildVaccineReminderLog.child_local_id == child_local_id,
+            )
+        )
+
     def add(self, obj: object) -> None:
         self._db.add(obj)
 
-    def delete(self, obj: object) -> None:
-        self._db.delete(obj)
+    async def delete(self, obj: object) -> None:
+        await self._db.delete(obj)
 
     async def flush(self) -> None:
         await self._db.flush()

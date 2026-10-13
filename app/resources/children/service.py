@@ -92,7 +92,9 @@ class ChildrenService:
         row = await self._repo.get_child(child_id, user_id)
         if row is None:
             raise not_found()
-        self._repo.delete(row)
+        child_local_id = row.local_id or str(row.id)
+        await self._repo.delete_child_associated_data(user_id, child_local_id)
+        await self._repo.delete(row)
         await self._repo.flush()
 
     async def add_measurement(self, user_id: UUID, body: MeasurementIn) -> RowOut:
