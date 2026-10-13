@@ -2,11 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.schemas import PushOut
 from app.core.security.deps import RequireAny
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.push.repository import SqlAlchemyPushRepository
-from app.resources.push.schemas import PushIn
+from app.resources.push.schemas import PushIn, PushOut
 from app.resources.push.service import PushService
 
 router = APIRouter(prefix="/push", tags=["push"])

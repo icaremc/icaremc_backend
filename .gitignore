@@ -23,3 +23,7 @@ sync_supabase_to_pg.py
 verify_hash_demo.py
 hash_password_tool.py
 sync_user_phones.py
+
+# Credentials
+*firebase*.json
+*service-account*.json

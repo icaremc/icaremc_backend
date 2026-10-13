@@ -1,8 +1,7 @@
-from app.api.v1.schemas import PushOut
 from app.persistence.sqlalchemy.models import Notification
 from app.resources.push.fcm import send_fcm
 from app.resources.push.repository import PushRepository
-from app.resources.push.schemas import PushIn
+from app.resources.push.schemas import PushIn, PushOut
 
 
 class PushService:

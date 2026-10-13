@@ -10,6 +10,8 @@ os.environ["SMS_OTP_DEV_CODE"] = "123456"
 os.environ["SMS_API_BASE_URL"] = ""
 os.environ["CHAPA_SECRET_KEY"] = ""
 os.environ["FCM_SERVER_KEY"] = ""
+os.environ["FIREBASE_PRIVATE_KEY"] = ""
+os.environ["FIREBASE_CLIENT_EMAIL"] = ""
 
 import asyncio
 

@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -9,3 +10,7 @@ class PushIn(BaseModel):
     body: str
     type: str = "generic"
     data: dict[str, object] = Field(default_factory=dict)
+
+class PushOut(BaseModel):
+    ok: bool = True
+    fcm: dict[str, Any] | None = None
