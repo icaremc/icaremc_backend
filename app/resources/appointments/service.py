@@ -13,6 +13,7 @@ from app.persistence.sqlalchemy.serialize import row_dict
 from app.resources.appointments.repository import AppointmentRepository
 from app.resources.appointments.schemas import BookIn, ReviewIn
 from app.resources.errors import bad_request, conflict, not_found
+from app.resources.push.service import dispatch_notification
 from app.resources.serialize import require_row, to_rows
 
 
@@ -58,6 +59,25 @@ class AppointmentService:
             raise conflict("Slot already booked") from exc
         self._repo.add(ChatConversation(appointment_id=row.id, patient_id=user_id, doctor_id=body.doctor_id))
         await self._repo.flush()
+
+        # Real-time push notification to the doctor about new appointment request
+        p_name = profile.full_name or "A patient"
+        await dispatch_notification(
+            db=self._repo.session,
+            user_id=body.doctor_id,
+            title="New Appointment Request",
+            body=f"{p_name} booked for {body.appointment_date} at {body.time_slot}.",
+            type="appointment_new",
+            data={
+                "type": "appointment",
+                "screen": "doctor_appointment_detail",
+                "route": f"/doctor/appointments/{row.id}",
+                "resource_id": str(row.id),
+                "appointment_id": str(row.id),
+            },
+            is_urgent=True,
+        )
+
         return AppointmentOut.model_validate(row_dict(row))
 
     async def list_patient(self, user_id: UUID) -> list[AppointmentOut]:
@@ -73,14 +93,83 @@ class AppointmentService:
             raise not_found()
         if status == "completed":
             await credit_doctor_on_complete(self._repo.session, row)
+            # Push notification to the patient to review the consultation
+            doctor = await self._repo.get_doctor(doctor_id)
+            doc_name = (
+                f"{getattr(doctor, 'first_name', '') or ''} {getattr(doctor, 'last_name', '') or ''}".strip()
+                if doctor
+                else "Doctor"
+            )
+            doc_display = f"Dr. {doc_name}" if not doc_name.lower().startswith("dr.") else doc_name
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=row.patient_id,
+                title="Consultation Completed",
+                body=f"Your visit with {doc_display} has ended. Please leave a review.",
+                type="appointment_completed",
+                data={
+                    "type": "appointment_review",
+                    "screen": "appointment_review",
+                    "route": f"/appointments/{row.id}/review",
+                    "resource_id": str(row.id),
+                    "appointment_id": str(row.id),
+                },
+                is_urgent=True,
+            )
         elif status == "cancelled":
             try:
                 await refund_cancel(self._repo.session, row, cancelled_by="doctor")
             except ValueError as exc:
                 raise bad_request(str(exc)) from exc
+            # Push notification to patient that doctor cancelled
+            doctor = await self._repo.get_doctor(doctor_id)
+            doc_name = (
+                f"{getattr(doctor, 'first_name', '') or ''} {getattr(doctor, 'last_name', '') or ''}".strip()
+                if doctor
+                else "Doctor"
+            )
+            doc_display = f"Dr. {doc_name}" if not doc_name.lower().startswith("dr.") else doc_name
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=row.patient_id,
+                title="Appointment Cancelled",
+                body=f"{doc_display} cancelled the appointment scheduled on {row.appointment_date}.",
+                type="appointment_cancelled",
+                data={
+                    "type": "appointment",
+                    "screen": "appointment_detail",
+                    "route": f"/appointments/{row.id}",
+                    "resource_id": str(row.id),
+                    "appointment_id": str(row.id),
+                },
+                is_urgent=True,
+            )
         else:
             row.status = status
             await self._repo.flush()
+            if status == "confirmed":
+                doctor = await self._repo.get_doctor(doctor_id)
+                doc_name = (
+                    f"{getattr(doctor, 'first_name', '') or ''} {getattr(doctor, 'last_name', '') or ''}".strip()
+                    if doctor
+                    else "Doctor"
+                )
+                doc_display = f"Dr. {doc_name}" if not doc_name.lower().startswith("dr.") else doc_name
+                await dispatch_notification(
+                    db=self._repo.session,
+                    user_id=row.patient_id,
+                    title="Appointment Confirmed",
+                    body=f"{doc_display} confirmed your appointment scheduled on {row.appointment_date} at {row.time_slot}.",
+                    type="appointment_confirmed",
+                    data={
+                        "type": "appointment",
+                        "screen": "appointment_detail",
+                        "route": f"/appointments/{row.id}",
+                        "resource_id": str(row.id),
+                        "appointment_id": str(row.id),
+                    },
+                    is_urgent=True,
+                )
         return require_row(row)
 
     async def list_reviews_for_doctor(self, doctor_id: UUID) -> list[RowOut]:
@@ -91,6 +180,23 @@ class AppointmentService:
         if row is None:
             raise not_found()
         await refund_cancel(self._repo.session, row, cancelled_by="patient")
+        # Push notification to doctor that patient cancelled
+        p_name = row.patient_name or "Patient"
+        await dispatch_notification(
+            db=self._repo.session,
+            user_id=row.doctor_id,
+            title="Appointment Cancelled",
+            body=f"{p_name} cancelled their appointment on {row.appointment_date}.",
+            type="appointment_cancelled",
+            data={
+                "type": "appointment",
+                "screen": "doctor_appointment_detail",
+                "route": f"/doctor/appointments/{row.id}",
+                "resource_id": str(row.id),
+                "appointment_id": str(row.id),
+            },
+            is_urgent=True,
+        )
         return require_row(row)
 
     async def create_review(self, user_id: UUID, body: ReviewIn) -> RowOut:
