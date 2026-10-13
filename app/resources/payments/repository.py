@@ -16,11 +16,14 @@ class PaymentRepository(Protocol):
     async def get_service(self, service_id: UUID) -> DoctorService: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
+    @property
+    def session(self) -> AsyncSession: ...
 
 
 class SqlAlchemyPaymentRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
+        self.session = db
 
     async def get_patient_appointment(self, appointment_id: UUID, patient_id: UUID) -> Appointment | None:
         return (

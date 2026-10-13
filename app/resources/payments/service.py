@@ -11,6 +11,7 @@ from app.persistence.sqlalchemy.models import AppSubscription, CareSubscription
 from app.resources.errors import not_found, unauthorized, bad_request
 from app.resources.payments.repository import PaymentRepository
 from app.resources.payments.schemas import InitiateIn
+from app.resources.push.service import dispatch_notification
 
 class PaymentService:
     def __init__(self, repo: PaymentRepository) -> None:
@@ -92,6 +93,42 @@ class PaymentService:
             appt.payment_status = "paid"
             appt.payment_method = "chapa"
             await self._repo.flush()
+
+            # Push notification to Patient
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=appt.patient_id,
+                title="Payment Confirmed",
+                body=f"Prepayment of {amount} ETB received for your appointment on {appt.appointment_date}.",
+                type="payment_confirmed",
+                data={
+                    "type": "payment",
+                    "screen": "appointment_detail",
+                    "route": f"/appointments/{appt.id}",
+                    "resource_id": str(appt.id),
+                    "appointment_id": str(appt.id),
+                },
+                is_urgent=True,
+            )
+
+            # Push notification to Doctor
+            patient_name = appt.patient_name or "A patient"
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=appt.doctor_id,
+                title="Appointment Payment Received",
+                body=f"{patient_name} completed payment of {amount} ETB for {appt.appointment_date} at {appt.time_slot}.",
+                type="appointment_paid",
+                data={
+                    "type": "appointment",
+                    "screen": "doctor_appointment_detail",
+                    "route": f"/doctor/appointments/{appt.id}",
+                    "resource_id": str(appt.id),
+                    "appointment_id": str(appt.id),
+                },
+                is_urgent=True,
+            )
+
             return PaymentWebhookOut(type="appointment")
 
         if await self._repo.get_app_sub_by_tx(tx_ref):
@@ -117,6 +154,23 @@ class PaymentService:
                 )
             )
             await self._repo.flush()
+
+            # Push notification to Patient
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=UUID(user_id),
+                title="Subscription Active",
+                body="Your iCare app subscription is now active. Enjoy full premium care features!",
+                type="subscription_active",
+                data={
+                    "type": "subscription",
+                    "screen": "subscriptions",
+                    "route": "/subscriptions",
+                    "resource_id": str(user_id),
+                },
+                is_urgent=True,
+            )
+
             return PaymentWebhookOut(type="app_subscription")
 
         if kind == "care_subscription" and user_id and meta.get("service_id") and meta.get("doctor_id"):
@@ -137,6 +191,40 @@ class PaymentService:
                 )
             )
             await self._repo.flush()
+
+            # Push notification to Patient
+            svc_name = getattr(service, "name", "Care")
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=UUID(user_id),
+                title="Care Plan Active",
+                body=f"Your {svc_name} care plan has been activated.",
+                type="care_subscription_active",
+                data={
+                    "type": "care_subscription",
+                    "screen": "care_subscription_detail",
+                    "route": "/subscriptions/care",
+                    "resource_id": str(meta.get("service_id")),
+                },
+                is_urgent=True,
+            )
+
+            # Push notification to Doctor
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=UUID(meta["doctor_id"]),
+                title="New Care Subscription",
+                body=f"A patient has enrolled in your {svc_name} care program.",
+                type="doctor_care_subscription_new",
+                data={
+                    "type": "care_subscription",
+                    "screen": "doctor_care_subscriptions",
+                    "route": "/doctor/care-subscriptions",
+                    "resource_id": str(meta.get("service_id")),
+                },
+                is_urgent=True,
+            )
+
             return PaymentWebhookOut(type="care_subscription")
 
         return PaymentWebhookOut(unmatched=True)
