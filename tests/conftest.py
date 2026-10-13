@@ -144,7 +144,7 @@ def admin_auth(client):
     assert boot.status_code == 200, boot.text
     login = client.post(
         "/api/v1/auth/admin/login",
-        json={"email": "admin@test.icaremc.app", "password": "adminpass123"},
+        data={"username": "admin@test.icaremc.app", "password": "adminpass123"},
     )
     assert login.status_code == 200, login.text
     body = login.json()
