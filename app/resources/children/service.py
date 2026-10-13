@@ -1,14 +1,17 @@
+from datetime import date
 from uuid import UUID
 
 from app.api.v1.schemas import RowOut
 from app.persistence.sqlalchemy.models import (
     Child,
+    ChildFollowupVisit,
     ChildGrowthMeasurement,
     ChildMilestoneCheck,
     ChildVaccineRecord,
 )
+from app.resources.children.helpers import calculate_visit_due_date
 from app.resources.children.repository import ChildrenRepository
-from app.resources.children.schemas import ChildIn, MeasurementIn, MilestoneIn, VaccineIn
+from app.resources.children.schemas import ChildIn, ChildPatchIn, MeasurementIn, MilestoneIn, VaccineIn
 from app.resources.errors import not_found
 from app.resources.serialize import require_row, to_rows
 
@@ -16,6 +19,31 @@ from app.resources.serialize import require_row, to_rows
 class ChildrenService:
     def __init__(self, repo: ChildrenRepository) -> None:
         self._repo = repo
+
+    async def _generate_followup_visits(self, user_id: UUID, child_local_id: str, birth_date: date) -> None:
+        templates = await self._repo.list_published_followup_templates()
+        if not templates:
+            return
+        existing_visits = await self._repo.list_followups(user_id, child_local_id)
+        existing_map = {visit.template_id: visit for visit in existing_visits}
+
+        for template in templates:
+            due_date = calculate_visit_due_date(birth_date, template.offset_days, template.offset_months)
+            if template.id in existing_map:
+                visit = existing_map[template.id]
+                if visit.status != "completed":
+                    visit.due_date = due_date
+            else:
+                self._repo.add(
+                    ChildFollowupVisit(
+                        user_id=user_id,
+                        child_local_id=child_local_id,
+                        template_id=template.id,
+                        due_date=due_date,
+                        status="scheduled",
+                    )
+                )
+        await self._repo.flush()
 
     async def list_children(self, user_id: UUID) -> list[RowOut]:
         return to_rows(await self._repo.list_children(user_id))
@@ -30,16 +58,35 @@ class ChildrenService:
         row = Child(user_id=user_id, **body.model_dump())
         self._repo.add(row)
         await self._repo.flush()
+        child_local_id = row.local_id or str(row.id)
+        if not row.local_id:
+            row.local_id = child_local_id
+            await self._repo.flush()
+        if row.birth_date:
+            await self._generate_followup_visits(user_id, child_local_id, row.birth_date)
         return require_row(row)
 
-    async def patch_child(self, child_id: UUID, user_id: UUID, body: ChildIn) -> RowOut:
+    async def patch_child(self, child_id: UUID, user_id: UUID, body: ChildPatchIn) -> RowOut:
         row = await self._repo.get_child(child_id, user_id)
         if row is None:
             raise not_found()
+        prev_birth_date = row.birth_date
         for key, value in body.model_dump(exclude_unset=True).items():
             setattr(row, key, value)
         await self._repo.flush()
+        child_local_id = row.local_id or str(row.id)
+        if row.birth_date and row.birth_date != prev_birth_date:
+            await self._generate_followup_visits(user_id, child_local_id, row.birth_date)
         return require_row(row)
+
+    async def backfill_followups(self, child_id: UUID, user_id: UUID) -> list[RowOut]:
+        row = await self._repo.get_child(child_id, user_id)
+        if row is None:
+            raise not_found()
+        child_local_id = row.local_id or str(row.id)
+        if row.birth_date:
+            await self._generate_followup_visits(user_id, child_local_id, row.birth_date)
+        return to_rows(await self._repo.list_followups(user_id, child_local_id))
 
     async def delete_child(self, child_id: UUID, user_id: UUID) -> None:
         row = await self._repo.get_child(child_id, user_id)

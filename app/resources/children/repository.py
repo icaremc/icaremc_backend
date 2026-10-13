@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.persistence.sqlalchemy.models import (
     Child,
     ChildFollowupVisit,
+    ChildFollowupVisitTemplate,
     ChildGrowthMeasurement,
     ChildMilestoneCheck,
     ChildVaccineRecord,
@@ -21,6 +22,7 @@ class ChildrenRepository(Protocol):
     async def list_vaccines(self, user_id: UUID, child_local_id: str) -> list[ChildVaccineRecord]: ...
     async def get_vaccine(self, user_id: UUID, child_local_id: str, vaccine_key: str) -> ChildVaccineRecord | None: ...
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[ChildFollowupVisit]: ...
+    async def list_published_followup_templates(self) -> list[ChildFollowupVisitTemplate]: ...
     def add(self, obj: object) -> None: ...
     def delete(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
@@ -99,6 +101,19 @@ class SqlAlchemyChildrenRepository:
                         ChildFollowupVisit.user_id == user_id,
                         ChildFollowupVisit.child_local_id == child_local_id,
                     )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def list_published_followup_templates(self) -> list[ChildFollowupVisitTemplate]:
+        return list(
+            (
+                await self._db.execute(
+                    select(ChildFollowupVisitTemplate)
+                    .where(ChildFollowupVisitTemplate.is_published.is_(True))
+                    .order_by(ChildFollowupVisitTemplate.sort_order.asc())
                 )
             )
             .scalars()

@@ -23,6 +23,24 @@ class ChildIn(BaseModel):
     is_active: bool = True
 
 
+class ChildPatchIn(BaseModel):
+    local_id: str | None = None
+    name: str | None = None
+    gender: str | None = None
+    birth_date: date | None = None
+    pregnancy_id: UUID | None = None
+    birth_weight: Decimal | None = None
+    birth_height: Decimal | None = None
+    delivery_type: str | None = None
+    gestational_age_weeks: Decimal | None = None
+    gestational_age_days: int | None = None
+    birth_hospital: str | None = None
+    blood_group: str | None = None
+    woreda: str | None = None
+    photo_url: str | None = None
+    is_active: bool | None = None
+
+
 class MeasurementIn(BaseModel):
     child_local_id: str
     measured_on: date | None = None
