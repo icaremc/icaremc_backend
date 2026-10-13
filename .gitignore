@@ -27,3 +27,4 @@ sync_user_phones.py
 # Credentials
 *firebase*.json
 *service-account*.json
+*.egg

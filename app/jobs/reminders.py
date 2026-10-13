@@ -53,13 +53,21 @@ async def run_followup_reminders() -> int:
             profile = (await db.execute(select(Profile).where(Profile.id == visit.user_id))).scalar_one_or_none()
             title = "Follow-up visit reminder"
             body = f"Child follow-up due on {visit.due_date.isoformat()}"
+            followup_data = {
+                "type": "followup",
+                "screen": "followup_detail",
+                "route": f"/care/followup/{visit.id}",
+                "visit_id": str(visit.id),
+                "child_local_id": str(visit.child_local_id or ""),
+                "click_action": "FLUTTER_NOTIFICATION_CLICK",
+            }
             db.add(
                 Notification(
                     user_id=visit.user_id,
                     type="followup_reminder",
                     title=title,
                     body=body,
-                    data={"visit_id": str(visit.id), "child_local_id": visit.child_local_id},
+                    data=followup_data,
                 )
             )
             db.add(
@@ -70,8 +78,8 @@ async def run_followup_reminders() -> int:
                     due_date=visit.due_date,
                 )
             )
-            if profile and profile.fcm_token:
-                await send_fcm(profile.fcm_token, title, body)
+            if profile and profile.fcm_token and profile.notifications_enabled is not False:
+                await send_fcm(profile.fcm_token, title, body, followup_data)
             sent += 1
         await db.commit()
     return sent
@@ -104,15 +112,24 @@ async def run_vaccine_reminders() -> int:
                 continue
             if not any(s.code == code for s in schedule):
                 continue
+            profile = (await db.execute(select(Profile).where(Profile.id == record.user_id))).scalar_one_or_none()
             title = "Vaccine reminder"
             body = f"{record.vaccine_name} is due"
+            vaccine_data = {
+                "type": "vaccine",
+                "screen": "vaccine_detail",
+                "route": f"/child/{record.child_local_id}/vaccines",
+                "vaccine_key": code,
+                "child_local_id": str(record.child_local_id or ""),
+                "click_action": "FLUTTER_NOTIFICATION_CLICK",
+            }
             db.add(
                 Notification(
                     user_id=record.user_id,
                     type="vaccine_reminder",
                     title=title,
                     body=body,
-                    data={"vaccine_key": code, "child_local_id": record.child_local_id},
+                    data=vaccine_data,
                 )
             )
             db.add(
@@ -123,6 +140,8 @@ async def run_vaccine_reminders() -> int:
                     remind_key=remind_key,
                 )
             )
+            if profile and profile.fcm_token and profile.notifications_enabled is not False:
+                await send_fcm(profile.fcm_token, title, body, vaccine_data)
             sent += 1
         await db.commit()
     return sent
