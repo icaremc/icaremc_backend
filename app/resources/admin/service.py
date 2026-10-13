@@ -77,8 +77,11 @@ from app.resources.admin.schemas import (
     WeekIn,
     WeekPatchIn,
     WeekTranslationIn,
+    BroadcastNotificationIn,
+    UserNotificationIn,
 )
 from app.resources.errors import bad_request, forbidden, not_found
+from app.resources.push.service import dispatch_notification
 from app.resources.auth.repository import SqlAlchemyAuthRepository
 from app.resources.auth.service import AuthService
 from app.resources.serialize import require_row, to_rows
@@ -454,6 +457,23 @@ class AdminService:
         row.is_verified = body.is_verified
         await self._log(admin, "doctor.verify", "Doctor verification updated", doctor_id=str(doctor_id))
         await self._repo.session.flush()
+
+        if body.is_verified:
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=doctor_id,
+                title="Profile Verified",
+                body="Your doctor profile has been verified! You can now start accepting patient bookings.",
+                type="doctor_verified",
+                data={
+                    "type": "doctor_profile",
+                    "screen": "doctor_profile",
+                    "route": "/doctor/profile",
+                    "resource_id": str(doctor_id),
+                },
+                is_urgent=True,
+            )
+
         return require_row(row)
 
     async def list_appointments(self, limit: int) -> dict[str, object]:
@@ -657,6 +677,41 @@ class AdminService:
                 amount=float(req.amount),
             )
         await self._repo.session.flush()
+
+        # Push notification to doctor regarding payout update
+        if body.status in ("approved", "completed"):
+            action_label = "approved" if body.status == "approved" else "completed"
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=req.doctor_id,
+                title=f"Payout Request {body.status.capitalize()}",
+                body=f"Your withdrawal request of {req.amount} ETB has been {action_label}.",
+                type="doctor_payout",
+                data={
+                    "type": "payout",
+                    "screen": "doctor_wallet",
+                    "route": "/doctor/wallet",
+                    "resource_id": str(req.id),
+                },
+                is_urgent=True,
+            )
+        elif body.status == "rejected":
+            note_suffix = f" Reason: {body.admin_note}" if body.admin_note else ""
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=req.doctor_id,
+                title="Payout Request Rejected",
+                body=f"Your withdrawal request of {req.amount} ETB was rejected.{note_suffix}",
+                type="doctor_payout",
+                data={
+                    "type": "payout",
+                    "screen": "doctor_wallet",
+                    "route": "/doctor/wallet",
+                    "resource_id": str(req.id),
+                },
+                is_urgent=True,
+            )
+
         return require_row(req)
 
     async def wallet_transactions(self, limit: int) -> dict[str, object]:
@@ -691,6 +746,23 @@ class AdminService:
         )
         self._repo.session.add(row)
         await self._repo.session.flush()
+
+        # Push notification to patient
+        await dispatch_notification(
+            db=self._repo.session,
+            user_id=body.patient_id,
+            title="Subscription Active",
+            body=f"You have been granted an iCare membership for {body.days} days.",
+            type="subscription_active",
+            data={
+                "type": "subscription",
+                "screen": "subscriptions",
+                "route": "/subscriptions",
+                "resource_id": str(body.patient_id),
+            },
+            is_urgent=True,
+        )
+
         return require_row(row)
 
     async def revoke_membership(self, subscription_id: UUID) -> RowOut:
@@ -1411,6 +1483,27 @@ class AdminService:
         row = DocumentDelivery(document_id=document_id, recipient_id=recipient_id, sent_by=sender_id)
         self._repo.session.add(row)
         await self._repo.session.flush()
+
+        doc = (
+            await self._repo.session.execute(select(AdminDocument).where(AdminDocument.id == document_id))
+        ).scalar_one_or_none()
+        doc_title = doc.title if doc else "an administrative document"
+
+        await dispatch_notification(
+            db=self._repo.session,
+            user_id=recipient_id,
+            title="New Document Received",
+            body=f"You have received a new document: {doc_title}.",
+            type="admin_document",
+            data={
+                "type": "admin_document",
+                "screen": "doctor_documents",
+                "route": f"/doctor/documents/{document_id}",
+                "resource_id": str(document_id),
+            },
+            is_urgent=True,
+        )
+
         return require_row(row)
 
     async def doctor_document_deliveries(self, doctor_id: UUID) -> list[RowOut]:
@@ -1751,3 +1844,57 @@ class AdminService:
             email=body.email, password=body.password, full_name=body.full_name, admin_role="super_admin"
         )
         return {"id": str(admin_id)}
+
+    async def send_user_notification(self, user_id: UUID, body: UserNotificationIn, admin: AuthUser) -> dict[str, object]:
+        user = (await self._repo.session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise not_found("User not found")
+        data = {
+            "type": "care_admin_notice",
+            "screen": body.screen or "inbox",
+            "route": body.route or "/inbox",
+            "resource_id": str(user_id),
+        }
+        res = await dispatch_notification(
+            db=self._repo.session,
+            user_id=user_id,
+            title=body.title,
+            body=body.body,
+            type="care_admin_notice",
+            data=data,
+            is_urgent=body.is_urgent,
+        )
+        await self._log(admin, "admin.notify_user", f"Sent notice to {user_id}", title=body.title)
+        await self._repo.session.flush()
+        return {"ok": True, "notification_id": str(res[0].id), "fcm": res[1]}
+
+    async def broadcast_notification(self, body: BroadcastNotificationIn, admin: AuthUser) -> dict[str, object]:
+        query = select(User.id)
+        if body.target_role in ("patient", "doctor"):
+            query = query.where(User.role == body.target_role)
+        elif body.target_role != "all":
+            query = query.where(User.role == body.target_role)
+        else:
+            query = query.where(User.role.in_(["patient", "doctor"]))
+
+        user_ids = (await self._repo.session.execute(query)).scalars().all()
+        data = {
+            "type": "care_admin_broadcast",
+            "screen": body.screen or "inbox",
+            "route": body.route or "/inbox",
+        }
+        count = 0
+        for uid in user_ids:
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=uid,
+                title=body.title,
+                body=body.body,
+                type="care_admin_broadcast",
+                data={**data, "resource_id": str(uid)},
+                is_urgent=body.is_urgent,
+            )
+            count += 1
+        await self._log(admin, "admin.broadcast", f"Broadcast to {count} users ({body.target_role})", title=body.title)
+        await self._repo.session.flush()
+        return {"ok": True, "count": count}

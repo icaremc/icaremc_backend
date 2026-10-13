@@ -280,3 +280,20 @@ class ActivityLogsOut(BaseModel):
     logs: list[ActivityLogItemOut]
     pagination: PaginationOut
 
+
+class BroadcastNotificationIn(BaseModel):
+    title: str
+    body: str
+    target_role: str = "all"  # "all", "patient", "doctor"
+    route: str | None = None
+    screen: str | None = None
+    is_urgent: bool = True
+
+
+class UserNotificationIn(BaseModel):
+    title: str
+    body: str
+    route: str | None = None
+    screen: str | None = None
+    is_urgent: bool = True
+

@@ -38,6 +38,8 @@ from app.resources.admin.schemas import (
     WeekPatchIn,
     WeekTranslationIn,
     ReferralApplyIn,
+    BroadcastNotificationIn,
+    UserNotificationIn,
 )
 from app.resources.admin.service import AdminService
 
@@ -505,6 +507,21 @@ async def list_referral_commissions(
 @admins_router.post("/bootstrap-super-admin")
 async def bootstrap_super_admin(body: AdminCreateIn, svc: AdminDep) -> dict[str, str]:
     return await svc.bootstrap_super_admin(body)
+
+
+@users_router.post("/users/{user_id}/notify")
+async def send_user_notification(
+    user_id: UUID, body: UserNotificationIn, user: RequireAdmin, svc: AdminDep
+) -> dict[str, object]:
+    return await svc.send_user_notification(user_id, body, user)
+
+
+@router.post("/broadcast")
+async def broadcast_notification(
+    body: BroadcastNotificationIn, user: RequireAdmin, svc: AdminDep
+) -> dict[str, object]:
+    return await svc.broadcast_notification(body, user)
+
 
 router.include_router(activity_router)
 router.include_router(admins_router)
