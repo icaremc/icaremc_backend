@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.core.security.deps import RequireAny
+from app.core.security.deps import RequireAdmin
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.push.repository import SqlAlchemyPushRepository
 from app.resources.push.schemas import PushIn, PushOut
@@ -19,5 +19,5 @@ PushServiceDep = Annotated[PushService, Depends(get_push_service)]
 
 
 @router.post("/notify")
-async def notify(body: PushIn, user: RequireAny, svc: PushServiceDep) -> PushOut:
+async def notify(body: PushIn, user: RequireAdmin, svc: PushServiceDep) -> PushOut:
     return await svc.notify(body)

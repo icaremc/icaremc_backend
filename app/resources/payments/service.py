@@ -70,7 +70,7 @@ class PaymentService:
                 raw_body,
                 hashlib.sha256
             ).hexdigest()
-            if chapa_signature != expected_hash:
+            if chapa_signature != expected_hash and chapa_signature != MySettings.CHAPA_WEBHOOK_SECRET:
                 raise unauthorized("Bad signature")
         # elif MySettings.CHAPA_SECRET_KEY or MySettings.ENVIRONMENT != EnvironmentOptions.DEVELOPMENT:
         #     raise unauthorized("Webhook secret required")
