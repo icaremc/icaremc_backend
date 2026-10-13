@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.persistence.sqlalchemy.models import ChatConversation, ChatMessage
+from app.persistence.sqlalchemy.models import ChatConversation, ChatMessage, DoctorProfile, Profile
 
 
 class ChatRepository(Protocol):
@@ -13,6 +13,8 @@ class ChatRepository(Protocol):
     async def get_for_patient(self, conversation_id: UUID, user_id: UUID) -> ChatConversation | None: ...
     async def get_for_doctor(self, conversation_id: UUID, user_id: UUID) -> ChatConversation | None: ...
     async def list_messages(self, conversation_id: UUID) -> list[ChatMessage]: ...
+    async def get_profile(self, user_id: UUID) -> Profile | None: ...
+    async def get_doctor(self, user_id: UUID) -> DoctorProfile | None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
 
@@ -63,6 +65,12 @@ class SqlAlchemyChatRepository:
             .scalars()
             .all()
         )
+
+    async def get_profile(self, user_id: UUID) -> Profile | None:
+        return (await self._db.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()
+
+    async def get_doctor(self, user_id: UUID) -> DoctorProfile | None:
+        return (await self._db.execute(select(DoctorProfile).where(DoctorProfile.id == user_id))).scalar_one_or_none()
 
     def add(self, obj: object) -> None:
         self._db.add(obj)

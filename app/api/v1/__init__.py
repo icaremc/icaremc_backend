@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+import app.api.v1.schemas  # noqa: F401
+
 from app.resources.admin.router import router as admin_router
 from app.resources.appointments.router import router as appointments_router
 from app.resources.auth.router import router as auth_router
