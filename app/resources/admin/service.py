@@ -588,6 +588,10 @@ class AdminService:
         if row is None:
             raise not_found()
         previous = row.status
+        if body.status == "completed" and previous != "completed":
+            from app.core.services.booking_finance import credit_doctor_on_complete
+
+            await credit_doctor_on_complete(self._repo.session, row)
         row.status = body.status
         if body.status == "cancelled":
             row.cancelled_by = "admin"

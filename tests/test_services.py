@@ -15,11 +15,13 @@ from app.core.services.sms_otp import normalize_phone
 from app.persistence.sqlalchemy.connection import async_session_factory
 from app.persistence.sqlalchemy.models import (
     Appointment,
+    AppSetting,
     DoctorProfile,
     DoctorWallet,
     PatientWallet,
     Profile,
     User,
+    WalletTransaction,
 )
 
 
@@ -143,6 +145,106 @@ def test_credit_and_cancel_patient(client):
             pw = await db.get(PatientWallet, patient.id)
             assert pw is not None
             assert pw.balance == Decimal("100")
+            await db.commit()
+
+    asyncio.run(_run())
+
+
+def test_platform_commission_deduction_and_cancellation(client):
+    import asyncio
+    from sqlalchemy import select
+
+    async def _run() -> None:
+        async with async_session_factory() as db:
+            # Seed 10% platform commission setting
+            db.add(AppSetting(id="finance", data={"platformCommissionPercent": 10}))
+
+            user_d = User(
+                phone=f"d-{uuid4().hex[:10]}",
+                password_hash=hash_password("x"),
+                role="doctor",
+                roles=["doctor"],
+            )
+            user_p = User(
+                phone=f"p-{uuid4().hex[:10]}",
+                password_hash=hash_password("x"),
+                role="patient",
+                roles=["patient"],
+            )
+            db.add_all([user_d, user_p])
+            await db.flush()
+
+            doctor = DoctorProfile(
+                id=user_d.id,
+                first_name="Doc",
+                last_name="Commission",
+                specialty="General",
+                hospital="Test Clinic",
+                referral_code=f"C{uuid4().hex[:6].upper()}",
+            )
+            patient = Profile(id=user_p.id, full_name="Pat Commission", phone=user_p.phone)
+            db.add_all([doctor, patient])
+            await db.flush()
+
+            db.add(DoctorWallet(doctor_id=doctor.id, available_balance=Decimal("0")))
+            db.add(PatientWallet(patient_id=patient.id, balance=Decimal("0")))
+
+            # Appointment with 500 ETB paid
+            appt = Appointment(
+                doctor_id=doctor.id,
+                patient_id=patient.id,
+                appointment_date=date.today() + timedelta(days=1),
+                time_slot="11:00",
+                status="confirmed",
+                total_amount=Decimal("500"),
+                amount_paid=Decimal("500"),
+                payment_status="paid",
+            )
+            db.add(appt)
+            await db.flush()
+
+            # Credit doctor on complete -> 10% commission deducted: 500 - 50 = 450 ETB net
+            await credit_doctor_on_complete(db, appt)
+            await db.refresh(appt)
+            assert appt.status == "completed"
+
+            wallet = await db.get(DoctorWallet, doctor.id)
+            assert wallet is not None
+            assert wallet.available_balance == Decimal("450.00")
+
+            tx = (
+                await db.execute(
+                    select(WalletTransaction).where(
+                        WalletTransaction.appointment_id == appt.id,
+                        WalletTransaction.type == "appointment_earning",
+                    )
+                )
+            ).scalar_one()
+            assert tx.amount == Decimal("450.00")
+            assert tx.is_credit is True
+            assert "10% platform commission" in (tx.note or "")
+            assert "ETB 50.00" in (tx.note or "")
+
+            # Doctor cancels after completion -> clawback is the net 450, patient refunded full 500
+            await cancel_appointment(db, appt, cancelled_by="doctor")
+            await db.refresh(wallet)
+            assert wallet.available_balance == Decimal("0.00")
+
+            pw = await db.get(PatientWallet, patient.id)
+            assert pw is not None
+            assert pw.balance == Decimal("500.00")
+
+            cancel_tx = (
+                await db.execute(
+                    select(WalletTransaction).where(
+                        WalletTransaction.appointment_id == appt.id,
+                        WalletTransaction.type == "cancel_penalty",
+                    )
+                )
+            ).scalar_one()
+            assert cancel_tx.amount == Decimal("450.00")
+            assert cancel_tx.is_credit is False
+
             await db.commit()
 
     asyncio.run(_run())
