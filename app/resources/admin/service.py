@@ -1,7 +1,10 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
+
+def _escape_like(val: str) -> str:
+    return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import AuthUser
@@ -278,8 +281,52 @@ class AdminService:
             "commission_chart": commission_chart,
         }
 
-    async def list_users(self, limit: int, offset: int) -> list[RowOut]:
-        rows = (await self._repo.session.execute(select(Profile).order_by(Profile.created_at.desc()).offset(offset).limit(limit))).scalars().all()
+    async def list_users(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        role: str | None = None,
+        is_pregnant: bool | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> list[RowOut]:
+        stmt = select(Profile)
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            stmt = stmt.join(User, Profile.id == User.id)
+            conditions.append(
+                or_(
+                    Profile.full_name.ilike(escaped, escape="\\"),
+                    Profile.phone.ilike(escaped, escape="\\"),
+                    User.email.ilike(escaped, escape="\\"),
+                    User.phone.ilike(escaped, escape="\\"),
+                )
+            )
+        elif role and role.strip():
+            stmt = stmt.join(User, Profile.id == User.id)
+
+        if role and role.strip():
+            r = role.strip()
+            conditions.append(or_(User.role == r, User.roles.any(r)))
+
+        if is_pregnant is not None:
+            active_preg_exists = select(Pregnancy.id).where(
+                Pregnancy.user_id == Profile.id, Pregnancy.status == "active"
+            ).exists()
+            conditions.append(active_preg_exists if is_pregnant else ~active_preg_exists)
+
+        if created_from is not None:
+            conditions.append(Profile.created_at >= created_from)
+        if created_to is not None:
+            conditions.append(Profile.created_at <= created_to)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        stmt = stmt.order_by(Profile.created_at.desc()).offset(offset).limit(limit)
+        rows = (await self._repo.session.execute(stmt)).scalars().all()
         return to_rows(list(rows))
 
     async def user_detail(self, user_id: UUID) -> dict[str, object]:
@@ -476,14 +523,50 @@ class AdminService:
 
         return require_row(row)
 
-    async def list_appointments(self, limit: int) -> dict[str, object]:
+    async def list_appointments(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        status: str | None = None,
+        doctor_id: UUID | None = None,
+        patient_id: UUID | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, object]:
+        stmt = (
+            select(Appointment, DoctorProfile, Profile)
+            .join(DoctorProfile, Appointment.doctor_id == DoctorProfile.id)
+            .join(Profile, Appointment.patient_id == Profile.id)
+        )
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    DoctorProfile.first_name.ilike(escaped, escape="\\"),
+                    DoctorProfile.last_name.ilike(escaped, escape="\\"),
+                    Profile.full_name.ilike(escaped, escape="\\"),
+                    Profile.phone.ilike(escaped, escape="\\"),
+                )
+            )
+        if status and status.strip():
+            conditions.append(Appointment.status == status.strip())
+        if doctor_id:
+            conditions.append(Appointment.doctor_id == doctor_id)
+        if patient_id:
+            conditions.append(Appointment.patient_id == patient_id)
+        if date_from is not None:
+            conditions.append(Appointment.scheduled_for >= date_from)
+        if date_to is not None:
+            conditions.append(Appointment.scheduled_for <= date_to)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
         rows = (
             await self._repo.session.execute(
-                select(Appointment, DoctorProfile, Profile)
-                .join(DoctorProfile, Appointment.doctor_id == DoctorProfile.id)
-                .join(Profile, Appointment.patient_id == Profile.id)
-                .order_by(Appointment.created_at.desc())
-                .limit(limit)
+                stmt.order_by(Appointment.created_at.desc()).offset(offset).limit(limit)
             )
         ).all()
         
@@ -527,14 +610,46 @@ class AdminService:
             raise not_found()
         return {"appointment": require_row(row), "conversation": None, "messages": []}
 
-    async def list_children(self, limit: int = 200) -> dict[str, object]:
+    async def list_children(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+        gender: str | None = None,
+        user_id: UUID | None = None,
+        dob_from: date | None = None,
+        dob_to: date | None = None,
+    ) -> dict[str, object]:
         cap = max(1, min(limit, 500))
+        stmt = (
+            select(Child, Profile)
+            .join(Profile, Child.user_id == Profile.id)
+        )
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    Child.name.ilike(escaped, escape="\\"),
+                    Profile.full_name.ilike(escaped, escape="\\"),
+                    Profile.phone.ilike(escaped, escape="\\"),
+                )
+            )
+        if gender and gender.strip():
+            conditions.append(Child.gender == gender.strip())
+        if user_id:
+            conditions.append(Child.user_id == user_id)
+        if dob_from is not None:
+            conditions.append(Child.birth_date >= dob_from)
+        if dob_to is not None:
+            conditions.append(Child.birth_date <= dob_to)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
         rows = (
             await self._repo.session.execute(
-                select(Child, Profile)
-                .join(Profile, Child.user_id == Profile.id)
-                .order_by(Child.created_at.desc())
-                .limit(cap)
+                stmt.order_by(Child.created_at.desc()).offset(offset).limit(cap)
             )
         ).all()
         
@@ -714,13 +829,45 @@ class AdminService:
 
         return require_row(req)
 
-    async def wallet_transactions(self, limit: int) -> dict[str, object]:
+    async def wallet_transactions(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        doctor_id: UUID | None = None,
+        type: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, object]:
+        stmt = (
+            select(WalletTransaction, DoctorProfile)
+            .join(DoctorProfile, WalletTransaction.doctor_id == DoctorProfile.id)
+        )
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    DoctorProfile.first_name.ilike(escaped, escape="\\"),
+                    DoctorProfile.last_name.ilike(escaped, escape="\\"),
+                    WalletTransaction.note.ilike(escaped, escape="\\"),
+                )
+            )
+        if doctor_id:
+            conditions.append(WalletTransaction.doctor_id == doctor_id)
+        if type and type.strip():
+            conditions.append(WalletTransaction.type == type.strip())
+        if date_from is not None:
+            conditions.append(WalletTransaction.created_at >= date_from)
+        if date_to is not None:
+            conditions.append(WalletTransaction.created_at <= date_to)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
         rows = (
             await self._repo.session.execute(
-                select(WalletTransaction, DoctorProfile)
-                .join(DoctorProfile, WalletTransaction.doctor_id == DoctorProfile.id)
-                .order_by(WalletTransaction.created_at.desc())
-                .limit(limit)
+                stmt.order_by(WalletTransaction.created_at.desc()).offset(offset).limit(limit)
             )
         ).all()
         
@@ -1516,31 +1663,121 @@ class AdminService:
         ).scalars().all()
         return to_rows(list(rows))
 
-    async def admin_activity(self, limit: int) -> list[RowOut]:
-        rows = (
-            await self._repo.session.execute(select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc()).limit(limit))
-        ).scalars().all()
-        return to_rows(list(rows))
+    async def admin_activity(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        actor_id: UUID | None = None,
+    ) -> list[RowOut]:
+        stmt = select(AdminActivityLog)
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    AdminActivityLog.event_type.ilike(escaped, escape="\\"),
+                    AdminActivityLog.event_label.ilike(escaped, escape="\\"),
+                    AdminActivityLog.actor_name.ilike(escaped, escape="\\"),
+                    AdminActivityLog.actor_email.ilike(escaped, escape="\\"),
+                )
+            )
+        if actor_id:
+            conditions.append(AdminActivityLog.actor_id == actor_id)
 
-    async def platform_activity(self, limit: int) -> list[RowOut]:
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
         rows = (
             await self._repo.session.execute(
-                select(PlatformActivityLog).order_by(PlatformActivityLog.created_at.desc()).limit(limit)
+                stmt.order_by(AdminActivityLog.created_at.desc()).offset(offset).limit(limit)
             )
         ).scalars().all()
         return to_rows(list(rows))
 
-    async def activity_logs(self, source: str, limit: int, offset: int = 0) -> dict[str, object]:
-        if source == "platform":
-            total = (await self._repo.session.execute(select(func.count()).select_from(PlatformActivityLog))).scalar_one()
-            rows = (
-                await self._repo.session.execute(select(PlatformActivityLog).order_by(PlatformActivityLog.created_at.desc()).limit(limit).offset(offset))
-            ).scalars().all()
-        else:
-            total = (await self._repo.session.execute(select(func.count()).select_from(AdminActivityLog))).scalar_one()
-            rows = (
-                await self._repo.session.execute(select(AdminActivityLog).order_by(AdminActivityLog.created_at.desc()).limit(limit).offset(offset))
-            ).scalars().all()
+    async def platform_activity(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        actor_id: UUID | None = None,
+    ) -> list[RowOut]:
+        stmt = select(PlatformActivityLog)
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    PlatformActivityLog.event_type.ilike(escaped, escape="\\"),
+                    PlatformActivityLog.event_label.ilike(escaped, escape="\\"),
+                    PlatformActivityLog.actor_name.ilike(escaped, escape="\\"),
+                    PlatformActivityLog.actor_email.ilike(escaped, escape="\\"),
+                )
+            )
+        if actor_id:
+            conditions.append(PlatformActivityLog.actor_id == actor_id)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        rows = (
+            await self._repo.session.execute(
+                stmt.order_by(PlatformActivityLog.created_at.desc()).offset(offset).limit(limit)
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
+
+    async def activity_logs(
+        self,
+        source: str,
+        limit: int,
+        offset: int = 0,
+        search: str | None = None,
+        event_type: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        actor_id: UUID | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, object]:
+        model = PlatformActivityLog if source == "platform" else AdminActivityLog
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    model.event_type.ilike(escaped, escape="\\"),
+                    model.event_label.ilike(escaped, escape="\\"),
+                    model.actor_name.ilike(escaped, escape="\\"),
+                    model.actor_email.ilike(escaped, escape="\\"),
+                )
+            )
+        if event_type and event_type.strip():
+            conditions.append(model.event_type == event_type.strip())
+        if resource_type and resource_type.strip():
+            conditions.append(model.resource_type == resource_type.strip())
+        if resource_id and resource_id.strip():
+            conditions.append(model.resource_id == resource_id.strip())
+        if actor_id:
+            conditions.append(model.actor_id == actor_id)
+        if date_from is not None:
+            conditions.append(model.created_at >= date_from)
+        if date_to is not None:
+            conditions.append(model.created_at <= date_to)
+
+        count_stmt = select(func.count()).select_from(model)
+        query_stmt = select(model).order_by(model.created_at.desc())
+
+        if conditions:
+            count_stmt = count_stmt.where(and_(*conditions))
+            query_stmt = query_stmt.where(and_(*conditions))
+
+        total = (await self._repo.session.execute(count_stmt)).scalar_one()
+        rows = (
+            await self._repo.session.execute(
+                query_stmt.limit(limit).offset(offset)
+            )
+        ).scalars().all()
 
         actor_ids = [r.actor_id for r in rows if r.actor_id and (not getattr(r, "actor_email", None) or not getattr(r, "actor_name", None))]
         admins_map = {}
@@ -1611,7 +1848,15 @@ class AdminService:
             }
         }
 
-    async def doctor_wallet(self, doctor_id: UUID, limit: int = 100) -> dict[str, object]:
+    async def doctor_wallet(
+        self,
+        doctor_id: UUID,
+        limit: int = 100,
+        offset: int = 0,
+        type: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, object]:
         doctor = (
             await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))
         ).scalar_one_or_none()
@@ -1633,12 +1878,21 @@ class AdminService:
             commission_percent = 10
 
         cap = max(1, min(limit, 500))
+        conditions = [WalletTransaction.doctor_id == doctor_id]
+        if type and type.strip():
+            conditions.append(WalletTransaction.type == type.strip())
+        if date_from is not None:
+            conditions.append(WalletTransaction.created_at >= date_from)
+        if date_to is not None:
+            conditions.append(WalletTransaction.created_at <= date_to)
+
         txs = list(
             (
                 await self._repo.session.execute(
                     select(WalletTransaction)
-                    .where(WalletTransaction.doctor_id == doctor_id)
+                    .where(and_(*conditions))
                     .order_by(WalletTransaction.created_at.desc())
+                    .offset(offset)
                     .limit(cap)
                 )
             ).scalars().all()
@@ -1721,31 +1975,54 @@ class AdminService:
             "currency": currency,
         }
 
-    async def list_referrals(self, limit: int = 200) -> list[dict[str, object]]:
-        refs = list(
+    async def list_referrals(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+        doctor_id: UUID | None = None,
+        is_subscribed: bool | None = None,
+    ) -> list[dict[str, object]]:
+        stmt = (
+            select(DoctorReferral, Profile, DoctorProfile)
+            .join(Profile, DoctorReferral.patient_id == Profile.id)
+            .join(DoctorProfile, DoctorReferral.doctor_id == DoctorProfile.id)
+        )
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    DoctorReferral.referral_code.ilike(escaped, escape="\\"),
+                    Profile.full_name.ilike(escaped, escape="\\"),
+                    Profile.phone.ilike(escaped, escape="\\"),
+                    DoctorProfile.first_name.ilike(escaped, escape="\\"),
+                    DoctorProfile.last_name.ilike(escaped, escape="\\"),
+                )
+            )
+        if doctor_id:
+            conditions.append(DoctorReferral.doctor_id == doctor_id)
+        if is_subscribed is not None:
+            has_sub = select(AppSubscription.id).where(
+                AppSubscription.patient_id == DoctorReferral.patient_id,
+                AppSubscription.amount_paid > 0,
+            ).exists()
+            conditions.append(has_sub if is_subscribed else ~has_sub)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        rows = list(
             (
                 await self._repo.session.execute(
-                    select(DoctorReferral).order_by(DoctorReferral.created_at.desc()).limit(limit)
+                    stmt.order_by(DoctorReferral.created_at.desc()).offset(offset).limit(limit)
                 )
-            ).scalars().all()
+            ).all()
         )
-        if not refs:
+        if not rows:
             return []
 
-        patient_ids = {r.patient_id for r in refs}
-        doctor_ids = {r.doctor_id for r in refs}
-        profiles = {
-            p.id: p
-            for p in (
-                await self._repo.session.execute(select(Profile).where(Profile.id.in_(patient_ids)))
-            ).scalars().all()
-        }
-        doctors = {
-            d.id: d
-            for d in (
-                await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id.in_(doctor_ids)))
-            ).scalars().all()
-        }
+        patient_ids = {ref.patient_id for ref, _, _ in rows}
         paid = {
             row.patient_id
             for row in (
@@ -1759,9 +2036,7 @@ class AdminService:
         }
 
         out: list[dict[str, object]] = []
-        for ref in refs:
-            profile = profiles.get(ref.patient_id)
-            doctor = doctors.get(ref.doctor_id)
+        for ref, profile, doctor in rows:
             doctor_name = None
             if doctor is not None:
                 parts = [p for p in [doctor.first_name, doctor.last_name] if p and str(p).strip()]
@@ -1781,38 +2056,47 @@ class AdminService:
             )
         return out
 
-    async def list_referral_commissions(self, limit: int = 200) -> list[dict[str, object]]:
+    async def list_referral_commissions(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+        doctor_id: UUID | None = None,
+    ) -> list[dict[str, object]]:
+        stmt = (
+            select(DoctorReferralCommission, Profile, DoctorProfile)
+            .join(Profile, DoctorReferralCommission.patient_id == Profile.id)
+            .join(DoctorProfile, DoctorReferralCommission.doctor_id == DoctorProfile.id)
+        )
+        conditions = []
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    Profile.full_name.ilike(escaped, escape="\\"),
+                    Profile.phone.ilike(escaped, escape="\\"),
+                    DoctorProfile.first_name.ilike(escaped, escape="\\"),
+                    DoctorProfile.last_name.ilike(escaped, escape="\\"),
+                )
+            )
+        if doctor_id:
+            conditions.append(DoctorReferralCommission.doctor_id == doctor_id)
+
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
         rows = list(
             (
                 await self._repo.session.execute(
-                    select(DoctorReferralCommission)
-                    .order_by(DoctorReferralCommission.created_at.desc())
-                    .limit(limit)
+                    stmt.order_by(DoctorReferralCommission.created_at.desc()).offset(offset).limit(limit)
                 )
-            ).scalars().all()
+            ).all()
         )
         if not rows:
             return []
 
-        patient_ids = {r.patient_id for r in rows}
-        doctor_ids = {r.doctor_id for r in rows}
-        profiles = {
-            p.id: p
-            for p in (
-                await self._repo.session.execute(select(Profile).where(Profile.id.in_(patient_ids)))
-            ).scalars().all()
-        }
-        doctors = {
-            d.id: d
-            for d in (
-                await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id.in_(doctor_ids)))
-            ).scalars().all()
-        }
-
         out: list[dict[str, object]] = []
-        for row in rows:
-            profile = profiles.get(row.patient_id)
-            doctor = doctors.get(row.doctor_id)
+        for row, profile, doctor in rows:
             doctor_name = None
             if doctor is not None:
                 parts = [p for p in [doctor.first_name, doctor.last_name] if p and str(p).strip()]
@@ -1830,6 +2114,7 @@ class AdminService:
                     "currency": row.currency,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "patient_name": getattr(profile, "full_name", None) if profile else None,
+                    "patient_phone": getattr(profile, "phone", None) if profile else None,
                     "doctor_name": doctor_name,
                 }
             )

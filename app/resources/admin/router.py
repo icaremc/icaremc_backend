@@ -1,7 +1,8 @@
+from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequireAdmin
@@ -73,8 +74,26 @@ async def dashboard(user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
 
 
 @users_router.get("/users")
-async def list_users(user: RequireAdmin, svc: AdminDep, limit: int = 100, offset: int = 0) -> list[RowOut]:
-    return await svc.list_users(limit, offset)
+async def list_users(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search full name, phone, or email")] = None,
+    role: Annotated[str | None, Query(description="Filter by role")] = None,
+    is_pregnant: Annotated[bool | None, Query(description="Filter by pregnancy status")] = None,
+    created_from: Annotated[datetime | None, Query(description="Filter by created_at >= created_from")] = None,
+    created_to: Annotated[datetime | None, Query(description="Filter by created_at <= created_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RowOut]:
+    return await svc.list_users(
+        limit=limit,
+        offset=offset,
+        search=search,
+        role=role,
+        is_pregnant=is_pregnant,
+        created_from=created_from,
+        created_to=created_to,
+    )
 
 
 @users_router.get("/users/{user_id}")
@@ -114,9 +133,23 @@ async def list_doctor_services(doctor_id: UUID, user: RequireAdmin, svc: AdminDe
 
 @doctors_router.get("/doctors/{doctor_id}/wallet")
 async def doctor_wallet(
-    doctor_id: UUID, user: RequireAdmin, svc: AdminDep, limit: int = 100
+    doctor_id: UUID,
+    user: RequireAdmin,
+    svc: AdminDep,
+    type: Annotated[str | None, Query(description="Filter by transaction type")] = None,
+    date_from: Annotated[datetime | None, Query(description="Filter by created_at >= date_from")] = None,
+    date_to: Annotated[datetime | None, Query(description="Filter by created_at <= date_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, object]:
-    return await svc.doctor_wallet(doctor_id, limit)
+    return await svc.doctor_wallet(
+        doctor_id=doctor_id,
+        limit=limit,
+        offset=offset,
+        type=type,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @doctors_router.patch("/doctors/{doctor_id}/booking")
@@ -137,8 +170,28 @@ async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminD
 
 
 @appointments_router.get("/appointments")
-async def list_appointments(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> dict[str, object]:
-    return await svc.list_appointments(limit)
+async def list_appointments(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search doctor name, patient name, or phone")] = None,
+    status: Annotated[str | None, Query(description="Filter by status")] = None,
+    doctor_id: Annotated[UUID | None, Query(description="Filter by doctor ID")] = None,
+    patient_id: Annotated[UUID | None, Query(description="Filter by patient ID")] = None,
+    date_from: Annotated[datetime | None, Query(description="Filter by scheduled_for >= date_from")] = None,
+    date_to: Annotated[datetime | None, Query(description="Filter by scheduled_for <= date_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    return await svc.list_appointments(
+        limit=limit,
+        offset=offset,
+        search=search,
+        status=status,
+        doctor_id=doctor_id,
+        patient_id=patient_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @appointments_router.patch("/appointments/{appointment_id}")
@@ -154,8 +207,26 @@ async def get_appointment(appointment_id: UUID, user: RequireAdmin, svc: AdminDe
 
 
 @children_router.get("/children")
-async def list_children(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> dict[str, object]:
-    return await svc.list_children(limit)
+async def list_children(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search child name, parent name, or phone")] = None,
+    gender: Annotated[str | None, Query(description="Filter by gender")] = None,
+    user_id: Annotated[UUID | None, Query(description="Filter by parent user ID")] = None,
+    dob_from: Annotated[date | None, Query(description="Filter by birth date >= dob_from")] = None,
+    dob_to: Annotated[date | None, Query(description="Filter by birth date <= dob_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    return await svc.list_children(
+        limit=limit,
+        offset=offset,
+        search=search,
+        gender=gender,
+        user_id=user_id,
+        dob_from=dob_from,
+        dob_to=dob_to,
+    )
 
 
 @children_router.get("/children/{child_id}")
@@ -204,8 +275,26 @@ async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdm
 
 
 @finance_router.get("/wallet-transactions")
-async def wallet_transactions(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> dict[str, object]:
-    return await svc.wallet_transactions(limit)
+async def wallet_transactions(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search doctor name or note")] = None,
+    doctor_id: Annotated[UUID | None, Query(description="Filter by doctor ID")] = None,
+    type: Annotated[str | None, Query(description="Filter by transaction type")] = None,
+    date_from: Annotated[datetime | None, Query(description="Filter by created_at >= date_from")] = None,
+    date_to: Annotated[datetime | None, Query(description="Filter by created_at <= date_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    return await svc.wallet_transactions(
+        limit=limit,
+        offset=offset,
+        search=search,
+        doctor_id=doctor_id,
+        type=type,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @membership_router.post("/membership/grant")
@@ -474,34 +563,96 @@ async def deliver_document(document_id: UUID, recipient_id: UUID, user: RequireA
 
 
 @activity_router.get("/activity/admin")
-async def admin_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
-    return await svc.admin_activity(limit)
+async def admin_activity(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search event or actor")] = None,
+    actor_id: Annotated[UUID | None, Query(description="Filter by actor ID")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RowOut]:
+    return await svc.admin_activity(limit=limit, offset=offset, search=search, actor_id=actor_id)
 
 
 @activity_router.get("/activity/platform")
-async def platform_activity(user: RequireAdmin, svc: AdminDep, limit: int = 100) -> list[RowOut]:
-    return await svc.platform_activity(limit)
+async def platform_activity(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search event or actor")] = None,
+    actor_id: Annotated[UUID | None, Query(description="Filter by actor ID")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RowOut]:
+    return await svc.platform_activity(limit=limit, offset=offset, search=search, actor_id=actor_id)
 
 
 @activity_router.get("/activity-logs")
 async def activity_logs(
-    user: RequireAdmin, svc: AdminDep, source: str = "all", limit: int = 100, offset: int = 0
+    user: RequireAdmin,
+    svc: AdminDep,
+    source: Annotated[str, Query(description="Activity source (all, admin, platform)")] = "all",
+    search: Annotated[str | None, Query(description="Search event or actor")] = None,
+    event_type: Annotated[str | None, Query(description="Filter by event type")] = None,
+    resource_type: Annotated[str | None, Query(description="Filter by resource type")] = None,
+    resource_id: Annotated[str | None, Query(description="Filter by resource ID")] = None,
+    actor_id: Annotated[UUID | None, Query(description="Filter by actor ID")] = None,
+    date_from: Annotated[datetime | None, Query(description="Filter by created_at >= date_from")] = None,
+    date_to: Annotated[datetime | None, Query(description="Filter by created_at <= date_to")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ActivityLogsOut:
-    return ActivityLogsOut(**await svc.activity_logs(source, limit, offset))
+    return ActivityLogsOut(
+        **await svc.activity_logs(
+            source=source,
+            limit=limit,
+            offset=offset,
+            search=search,
+            event_type=event_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            actor_id=actor_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )
 
 
 
 
 @referrals_router.get("/referrals")
-async def list_referrals(user: RequireAdmin, svc: AdminDep, limit: int = 200) -> list[dict[str, object]]:
-    return await svc.list_referrals(limit)
+async def list_referrals(
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search referral code, patient, or doctor")] = None,
+    doctor_id: Annotated[UUID | None, Query(description="Filter by doctor ID")] = None,
+    is_subscribed: Annotated[bool | None, Query(description="Filter by subscription status")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, object]]:
+    return await svc.list_referrals(
+        limit=limit,
+        offset=offset,
+        search=search,
+        doctor_id=doctor_id,
+        is_subscribed=is_subscribed,
+    )
 
 
 @referrals_router.get("/referral-commissions")
 async def list_referral_commissions(
-    user: RequireAdmin, svc: AdminDep, limit: int = 200
+    user: RequireAdmin,
+    svc: AdminDep,
+    search: Annotated[str | None, Query(description="Search patient or doctor")] = None,
+    doctor_id: Annotated[UUID | None, Query(description="Filter by doctor ID")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict[str, object]]:
-    return await svc.list_referral_commissions(limit)
+    return await svc.list_referral_commissions(
+        limit=limit,
+        offset=offset,
+        search=search,
+        doctor_id=doctor_id,
+    )
 
 
 @admins_router.post("/bootstrap-super-admin")
