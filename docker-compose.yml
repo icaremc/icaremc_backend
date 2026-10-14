@@ -58,6 +58,29 @@ services:
     # Runs alembic migrations automatically
     entrypoint: [ "alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini" ]
 
+  reminders-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: myapp-reminders-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - .:/opt/app
+      - /opt/app/.venv
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REMINDERS_INTERVAL_HOURS=24
+      - REMINDERS_RUN_ON_STARTUP=true
+    command: [ "python", "-m", "app.jobs.daemon" ]
+
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: tinapay-pgadmin
