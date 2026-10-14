@@ -32,6 +32,7 @@ from app.resources.admin.schemas import (
     HospitalIn,
     LegalIn,
     PayoutActionIn,
+    PayoutReviewOut,
     SettingIn,
     SubscriptionGrantIn,
     WalletBalancePatchIn,
@@ -267,6 +268,11 @@ async def put_setting(setting_id: str, body: SettingIn, user: RequireAdmin, svc:
 @finance_router.get("/payout-requests")
 async def payout_requests(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.payout_requests()
+
+
+@finance_router.get("/payout-requests/{request_id}", response_model=PayoutReviewOut)
+async def get_payout_review(request_id: UUID, user: RequireAdmin, svc: AdminDep) -> PayoutReviewOut:
+    return await svc.get_payout_review(request_id)
 
 
 @finance_router.post("/payout-requests/{request_id}")

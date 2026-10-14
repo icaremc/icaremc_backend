@@ -277,6 +277,29 @@ def test_admin_cms_lists_and_payout_reject(client, admin_auth, doctor_auth, pati
     )
     assert rejected.status_code == 200
     assert rejected.json()["status"] == "rejected"
+
+    # Test payout review endpoint
+    review = client.get(f"/api/v1/admin/payout-requests/{req.json()['id']}", headers=h)
+    assert review.status_code == 200, review.text
+    r_body = review.json()
+    assert r_body["request"]["id"] == req.json()["id"]
+    assert r_body["request"]["status"] == "rejected"
+    assert r_body["request"]["amount"] == 50.0
+    assert r_body["request"]["admin_note"] == "docs missing"
+    assert r_body["request"]["payout_method"]["bank_name"] == "CBE"
+    assert "doctor" in r_body
+    assert "wallet" in r_body
+    assert "available_balance" in r_body["wallet"]
+    assert "this_month" in r_body
+    assert "net_earnings" in r_body["this_month"]
+    assert isinstance(r_body["payout_history"], list)
+    assert any(p["id"] == req.json()["id"] for p in r_body["payout_history"])
+    assert isinstance(r_body["recent_earnings"], list)
+
+    # 404 for non-existent payout request
+    import uuid
+    assert client.get(f"/api/v1/admin/payout-requests/{uuid.uuid4()}", headers=h).status_code == 404
+
     wallet = client.get("/api/v1/doctor/wallet", headers=doctor_h).json()["wallet"]
     assert Decimal(wallet["available_balance"]) >= Decimal("200")
 

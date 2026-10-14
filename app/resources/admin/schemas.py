@@ -2,7 +2,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class SettingIn(BaseModel):
@@ -296,4 +296,99 @@ class UserNotificationIn(BaseModel):
     route: str | None = None
     screen: str | None = None
     is_urgent: bool = True
+
+
+class PayoutMethodReviewOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    bank_name: str
+    account_number: str
+    holder_name: str
+    bank_code: str | None = None
+    swift_code: str | None = None
+    currency: str = "ETB"
+
+
+class PayoutRequestItemOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    doctor_id: UUID
+    amount: float
+    currency: str = "ETB"
+    status: str
+    created_at: datetime | None = None
+    doctor_note: str | None = None
+    admin_note: str | None = None
+    payment_date: datetime | None = None
+    payout_method: PayoutMethodReviewOut | None = None
+
+
+class PayoutDoctorInfoOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    name: str
+    phone: str | None = None
+    specialty: str | None = None
+    profile_photo_url: str | None = None
+
+
+class PayoutWalletStatsOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    available_balance: float = 0.0
+    pending_balance: float = 0.0
+    earned_this_week: float = 0.0
+    earned_this_month: float = 0.0
+    currency: str = "ETB"
+
+
+class PayoutMonthSummaryOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    net_earnings: float = 0.0
+    paid_out: float = 0.0
+    open_requests: float = 0.0
+    payout_requests: int = 0
+    platform_commission: int = 10
+
+
+class PayoutHistoryItemOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    date: str | datetime | None = None
+    created_at: str | datetime | None = None
+    amount: float
+    status: str
+    note: str | None = None
+    admin_note: str | None = None
+    payment_date: str | datetime | None = None
+
+
+class PayoutRecentEarningItemOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    date: str | datetime | None = None
+    created_at: str | datetime | None = None
+    amount: float
+    appointment_id: UUID | None = None
+    appointment: str | None = None
+    parent: str | None = None
+    patient_name: str | None = None
+    note: str | None = None
+
+
+class PayoutReviewOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    request: PayoutRequestItemOut
+    doctor: PayoutDoctorInfoOut
+    wallet: PayoutWalletStatsOut
+    this_month: PayoutMonthSummaryOut
+    payout_history: list[PayoutHistoryItemOut]
+    recent_earnings: list[PayoutRecentEarningItemOut]
 

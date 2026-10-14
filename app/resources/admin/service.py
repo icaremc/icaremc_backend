@@ -29,6 +29,7 @@ from app.persistence.sqlalchemy.models import (
     DocumentDelivery,
     DoctorCategory,
     DoctorCategoryTranslation,
+    DoctorPayoutMethod,
     DoctorPayoutRequest,
     DoctorProfile,
     DoctorReferral,
@@ -832,6 +833,323 @@ class AdminService:
             )
 
         return require_row(req)
+
+    async def get_payout_review(self, request_id: UUID) -> dict[str, object]:
+        req = (
+            await self._repo.session.execute(
+                select(DoctorPayoutRequest).where(DoctorPayoutRequest.id == request_id)
+            )
+        ).scalar_one_or_none()
+        if req is None:
+            raise not_found("Payout request not found")
+
+        doctor = await self._build_payout_doctor_info(req.doctor_id)
+        payout_method = await self._build_payout_method_info(req.payout_method_id)
+        wallet, this_month, this_month_camel = await self._build_payout_wallet_stats(req.doctor_id)
+        payout_history = await self._build_payout_history(req.doctor_id)
+        recent_earnings = await self._build_payout_recent_earnings(req.doctor_id)
+
+        currency = wallet.get("currency", "ETB")
+        return {
+            "request": {
+                "id": str(req.id),
+                "doctor_id": str(req.doctor_id),
+                "doctorId": str(req.doctor_id),
+                "amount": float(req.amount),
+                "currency": currency,
+                "status": req.status,
+                "created_at": req.created_at.isoformat() if req.created_at else None,
+                "createdAt": req.created_at.isoformat() if req.created_at else None,
+                "doctor_note": req.note,
+                "doctorNote": req.note,
+                "admin_note": req.admin_note,
+                "adminNote": req.admin_note,
+                "payment_date": req.payment_date.isoformat() if req.payment_date else None,
+                "paymentDate": req.payment_date.isoformat() if req.payment_date else None,
+                "payout_method": payout_method,
+                "payoutMethod": payout_method,
+            },
+            "doctor": doctor,
+            "wallet": wallet,
+            "this_month": this_month,
+            "thisMonth": this_month_camel,
+            "payout_history": payout_history,
+            "payoutHistory": payout_history,
+            "recent_earnings": recent_earnings,
+            "recentEarnings": recent_earnings,
+        }
+
+    async def _build_payout_doctor_info(self, doctor_id: UUID) -> dict[str, object]:
+        doc_profile = (
+            await self._repo.session.execute(
+                select(DoctorProfile).where(DoctorProfile.id == doctor_id)
+            )
+        ).scalar_one_or_none()
+        user_profile = (
+            await self._repo.session.execute(
+                select(Profile).where(Profile.id == doctor_id)
+            )
+        ).scalar_one_or_none()
+        doc_user = (
+            await self._repo.session.execute(
+                select(User).where(User.id == doctor_id)
+            )
+        ).scalar_one_or_none()
+
+        doc_name = None
+        if doc_profile:
+            parts = [p for p in [doc_profile.first_name, doc_profile.last_name] if p and str(p).strip()]
+            if parts:
+                doc_name = " ".join(parts)
+        if not doc_name and user_profile and user_profile.full_name:
+            doc_name = user_profile.full_name
+        if not doc_name:
+            doc_name = "Doctor"
+
+        phone = doc_profile.phone if doc_profile and doc_profile.phone else (doc_user.phone if doc_user else None)
+        return {
+            "id": str(doctor_id),
+            "name": doc_name,
+            "phone": phone,
+            "specialty": doc_profile.specialty if doc_profile else None,
+            "profile_photo_url": doc_profile.profile_photo_url if doc_profile else None,
+            "profilePhotoUrl": doc_profile.profile_photo_url if doc_profile else None,
+        }
+
+    async def _build_payout_method_info(self, payout_method_id: UUID | None) -> dict[str, object] | None:
+        if not payout_method_id:
+            return None
+        pm = (
+            await self._repo.session.execute(
+                select(DoctorPayoutMethod).where(DoctorPayoutMethod.id == payout_method_id)
+            )
+        ).scalar_one_or_none()
+        if not pm:
+            return None
+        return {
+            "id": str(pm.id),
+            "bank_name": pm.bank_name,
+            "bankName": pm.bank_name,
+            "account_number": pm.account_number,
+            "accountNumber": pm.account_number,
+            "holder_name": pm.holder_name,
+            "holderName": pm.holder_name,
+            "bank_code": pm.bank_code,
+            "bankCode": pm.bank_code,
+            "swift_code": pm.swift_code,
+            "swiftCode": pm.swift_code,
+            "currency": pm.currency,
+        }
+
+    async def _build_payout_wallet_stats(
+        self, doctor_id: UUID
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        wallet = (
+            await self._repo.session.execute(
+                select(DoctorWallet).where(DoctorWallet.doctor_id == doctor_id)
+            )
+        ).scalar_one_or_none()
+        avail_bal = float(wallet.available_balance) if wallet else 0.0
+        pending_bal = float(wallet.pending_balance) if wallet else 0.0
+        currency = wallet.currency if wallet and wallet.currency else "ETB"
+
+        now = datetime.now(UTC)
+        start_of_week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        earned_this_week_row = (
+            await self._repo.session.execute(
+                select(func.sum(WalletTransaction.amount)).where(
+                    WalletTransaction.doctor_id == doctor_id,
+                    WalletTransaction.type == "appointment_earning",
+                    WalletTransaction.created_at >= start_of_week,
+                )
+            )
+        ).scalar_one_or_none()
+        earned_this_week = float(earned_this_week_row or 0)
+
+        earned_this_month_row = (
+            await self._repo.session.execute(
+                select(func.sum(WalletTransaction.amount)).where(
+                    WalletTransaction.doctor_id == doctor_id,
+                    WalletTransaction.type == "appointment_earning",
+                    WalletTransaction.created_at >= start_of_month,
+                )
+            )
+        ).scalar_one_or_none()
+        earned_this_month = float(earned_this_month_row or 0)
+
+        paid_out_month_row = (
+            await self._repo.session.execute(
+                select(func.sum(DoctorPayoutRequest.amount)).where(
+                    DoctorPayoutRequest.doctor_id == doctor_id,
+                    DoctorPayoutRequest.status.in_(["completed", "approved"]),
+                    DoctorPayoutRequest.created_at >= start_of_month,
+                )
+            )
+        ).scalar_one_or_none()
+        paid_out_month = float(paid_out_month_row or 0)
+
+        open_requests_month_row = (
+            await self._repo.session.execute(
+                select(func.sum(DoctorPayoutRequest.amount)).where(
+                    DoctorPayoutRequest.doctor_id == doctor_id,
+                    DoctorPayoutRequest.status == "pending",
+                    DoctorPayoutRequest.created_at >= start_of_month,
+                )
+            )
+        ).scalar_one_or_none()
+        open_requests_month = float(open_requests_month_row or 0)
+
+        count_requests_month_row = (
+            await self._repo.session.execute(
+                select(func.count(DoctorPayoutRequest.id)).where(
+                    DoctorPayoutRequest.doctor_id == doctor_id,
+                    DoctorPayoutRequest.created_at >= start_of_month,
+                )
+            )
+        ).scalar_one_or_none()
+        payout_requests_count = int(count_requests_month_row or 0)
+
+        finance = (
+            await self._repo.session.execute(select(AppSetting).where(AppSetting.id == "finance"))
+        ).scalar_one_or_none()
+        finance_data = finance.data if finance and isinstance(finance.data, dict) else {}
+        commission_raw = finance_data.get("platformCommissionPercent", finance_data.get("platform_commission_percent", 10))
+        try:
+            commission_percent = int(float(commission_raw))
+        except (TypeError, ValueError):
+            commission_percent = 10
+
+        wallet_out = {
+            "available_balance": avail_bal,
+            "availableBalance": avail_bal,
+            "pending_balance": pending_bal,
+            "pendingBalance": pending_bal,
+            "earned_this_week": earned_this_week,
+            "earnedThisWeek": earned_this_week,
+            "earned_this_month": earned_this_month,
+            "earnedThisMonth": earned_this_month,
+            "currency": currency,
+        }
+        this_month = {
+            "net_earnings": earned_this_month,
+            "netEarnings": earned_this_month,
+            "paid_out": paid_out_month,
+            "paidOut": paid_out_month,
+            "open_requests": open_requests_month,
+            "openRequests": open_requests_month,
+            "payout_requests": payout_requests_count,
+            "payoutRequests": payout_requests_count,
+            "platform_commission": commission_percent,
+            "platformCommission": commission_percent,
+        }
+        this_month_camel = {
+            "netEarnings": earned_this_month,
+            "paidOut": paid_out_month,
+            "openRequests": open_requests_month,
+            "payoutRequests": payout_requests_count,
+            "platformCommission": commission_percent,
+        }
+        return wallet_out, this_month, this_month_camel
+
+    async def _build_payout_history(self, doctor_id: UUID, limit: int = 20) -> list[dict[str, object]]:
+        rows = list(
+            (
+                await self._repo.session.execute(
+                    select(DoctorPayoutRequest)
+                    .where(DoctorPayoutRequest.doctor_id == doctor_id)
+                    .order_by(DoctorPayoutRequest.created_at.desc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+        )
+        return [
+            {
+                "id": str(p.id),
+                "date": p.created_at.isoformat() if p.created_at else None,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "amount": float(p.amount),
+                "status": p.status,
+                "note": p.note,
+                "admin_note": p.admin_note,
+                "adminNote": p.admin_note,
+                "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+                "paymentDate": p.payment_date.isoformat() if p.payment_date else None,
+            }
+            for p in rows
+        ]
+
+    async def _build_payout_recent_earnings(self, doctor_id: UUID, limit: int = 20) -> list[dict[str, object]]:
+        recent_txs = list(
+            (
+                await self._repo.session.execute(
+                    select(WalletTransaction)
+                    .where(
+                        WalletTransaction.doctor_id == doctor_id,
+                        WalletTransaction.type == "appointment_earning",
+                    )
+                    .order_by(WalletTransaction.created_at.desc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+        )
+
+        earning_appts = {
+            a.id: a
+            for a in (
+                await self._repo.session.execute(
+                    select(Appointment).where(
+                        Appointment.id.in_([t.appointment_id for t in recent_txs if t.appointment_id is not None])
+                    )
+                )
+            ).scalars().all()
+        } if any(t.appointment_id for t in recent_txs) else {}
+
+        patient_profiles = {
+            p.id: p
+            for p in (
+                await self._repo.session.execute(
+                    select(Profile).where(
+                        Profile.id.in_([a.patient_id for a in earning_appts.values() if a.patient_id is not None])
+                    )
+                )
+            ).scalars().all()
+        } if any(a.patient_id for a in earning_appts.values()) else {}
+
+        earnings: list[dict[str, object]] = []
+        for tx in recent_txs:
+            appt = earning_appts.get(tx.appointment_id) if tx.appointment_id else None
+            patient = patient_profiles.get(appt.patient_id) if appt and appt.patient_id else None
+            parent_name = None
+            if patient and getattr(patient, "full_name", None):
+                parent_name = patient.full_name
+            elif appt and getattr(appt, "patient_name", None):
+                parent_name = appt.patient_name
+
+            appt_desc = None
+            if appt:
+                dt_str = appt.appointment_date.isoformat() if appt.appointment_date else ""
+                slot_str = f" {appt.time_slot}" if appt.time_slot else ""
+                svc_str = f" - {appt.service_name}" if appt.service_name else ""
+                appt_desc = f"{dt_str}{slot_str}{svc_str}".strip() or str(appt.id)
+
+            earnings.append(
+                {
+                    "id": str(tx.id),
+                    "date": tx.created_at.isoformat() if tx.created_at else None,
+                    "created_at": tx.created_at.isoformat() if tx.created_at else None,
+                    "amount": float(tx.amount),
+                    "appointment_id": str(tx.appointment_id) if tx.appointment_id else None,
+                    "appointmentId": str(tx.appointment_id) if tx.appointment_id else None,
+                    "appointment": appt_desc,
+                    "parent": parent_name,
+                    "patient_name": parent_name,
+                    "patientName": parent_name,
+                    "note": tx.note,
+                }
+            )
+        return earnings
 
     async def wallet_transactions(
         self,
