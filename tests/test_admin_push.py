@@ -17,9 +17,33 @@ def test_doctor_verification_push_notification(client, admin_auth, doctor_auth):
     )
     assert res.status_code == 200
 
-    # Doctor should receive in-app notification
+    # Doctor should receive exactly 1 in-app notification
     notifs = client.get("/api/v1/doctor/notifications", headers=doctor_h).json()
-    assert any(n["type"] == "doctor_verified" for n in notifs)
+    verified_notifs = [n for n in notifs if n["type"] == "doctor_verified"]
+    assert len(verified_notifs) == 1
+
+    # Admin verifies doctor again with is_verified=True -> should NOT duplicate
+    res_dup = client.post(
+        f"/api/v1/admin/doctors/{doctor_auth['user_id']}/verify",
+        headers=admin_h,
+        json={"is_verified": True},
+    )
+    assert res_dup.status_code == 200
+    notifs_after_dup = client.get("/api/v1/doctor/notifications", headers=doctor_h).json()
+    verified_after = [n for n in notifs_after_dup if n["type"] == "doctor_verified"]
+    assert len(verified_after) == 1
+
+    # Admin removes approval of doctor status
+    res_unverify = client.post(
+        f"/api/v1/admin/doctors/{doctor_auth['user_id']}/verify",
+        headers=admin_h,
+        json={"is_verified": False},
+    )
+    assert res_unverify.status_code == 200
+
+    # Doctor should receive revocation notification
+    notifs_after_unverify = client.get("/api/v1/doctor/notifications", headers=doctor_h).json()
+    assert any(n["type"] == "doctor_unverified" for n in notifs_after_unverify)
 
 
 def test_doctor_payout_push_notification(client, admin_auth, doctor_auth, patient_auth):

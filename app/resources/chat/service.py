@@ -24,20 +24,52 @@ class ChatService:
         conv = await self._repo.get_for_patient(conversation_id, user_id)
         if conv is None:
             raise not_found()
+        if hasattr(self._repo, "mark_messages_seen"):
+            await self._repo.mark_messages_seen(conversation_id, exclude_sender_id=user_id)
+            conv.patient_unread_count = 0
+            await self._repo.flush()
         return to_rows(await self._repo.list_messages(conversation_id))
 
     async def messages_doctor(self, conversation_id: UUID, user_id: UUID) -> list[RowOut]:
         conv = await self._repo.get_for_doctor(conversation_id, user_id)
         if conv is None:
             raise not_found()
+        if hasattr(self._repo, "mark_messages_seen"):
+            await self._repo.mark_messages_seen(conversation_id, exclude_sender_id=user_id)
+            conv.doctor_unread_count = 0
+            await self._repo.flush()
         return to_rows(await self._repo.list_messages(conversation_id))
+
+    async def mark_read_patient(self, conversation_id: UUID, user_id: UUID) -> dict[str, object]:
+        conv = await self._repo.get_for_patient(conversation_id, user_id)
+        if conv is None:
+            raise not_found()
+        count = await self._repo.mark_messages_seen(conversation_id, exclude_sender_id=user_id)
+        conv.patient_unread_count = 0
+        await self._repo.flush()
+        return {"ok": True, "marked_count": count}
+
+    async def mark_read_doctor(self, conversation_id: UUID, user_id: UUID) -> dict[str, object]:
+        conv = await self._repo.get_for_doctor(conversation_id, user_id)
+        if conv is None:
+            raise not_found()
+        count = await self._repo.mark_messages_seen(conversation_id, exclude_sender_id=user_id)
+        conv.doctor_unread_count = 0
+        await self._repo.flush()
+        return {"ok": True, "marked_count": count}
 
     async def send_patient(self, conversation_id: UUID, user_id: UUID, body: ChatIn) -> RowOut:
         conv = await self._repo.get_for_patient(conversation_id, user_id)
         if conv is None:
             raise not_found()
         text = body.body.strip()
-        msg = ChatMessage(conversation_id=conversation_id, sender_id=user_id, body=text)
+        msg = ChatMessage(
+            conversation_id=conversation_id,
+            sender_id=user_id,
+            body=text,
+            is_seen=False,
+            seen_at=None,
+        )
         self._repo.add(msg)
         conv.last_message = text
         conv.last_message_at = datetime.now(UTC)
@@ -72,7 +104,13 @@ class ChatService:
         if conv is None:
             raise not_found()
         text = body.body.strip()
-        msg = ChatMessage(conversation_id=conversation_id, sender_id=user_id, body=text)
+        msg = ChatMessage(
+            conversation_id=conversation_id,
+            sender_id=user_id,
+            body=text,
+            is_seen=False,
+            seen_at=None,
+        )
         self._repo.add(msg)
         conv.last_message = text
         conv.last_message_at = datetime.now(UTC)

@@ -4,7 +4,7 @@ from app.api.v1.schemas import RowOut
 from app.persistence.sqlalchemy.models import Pregnancy, PregnancyLog
 from app.resources.errors import not_found
 from app.resources.pregnancies.repository import PregnancyRepository
-from app.resources.pregnancies.schemas import PregnancyIn, PregnancyLogIn, PregnancyUpdate
+from app.resources.pregnancies.schemas import PregnancyIn, PregnancyLogIn, PregnancyLogUpdate, PregnancyUpdate
 from app.resources.serialize import require_row, to_rows
 
 
@@ -39,6 +39,23 @@ class PregnancyService:
         self._repo.add(row)
         await self._repo.flush()
         return require_row(row)
+
+    async def update_log(self, user_id: UUID, log_id: UUID, body: PregnancyLogUpdate) -> RowOut:
+        log = await self._repo.get_log_for_user(log_id, user_id)
+        if log is None:
+            raise not_found("Pregnancy log not found")
+        update_data = body.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(log, key, value)
+        await self._repo.flush()
+        return require_row(log)
+
+    async def delete_log(self, user_id: UUID, log_id: UUID) -> None:
+        log = await self._repo.get_log_for_user(log_id, user_id)
+        if log is None:
+            raise not_found("Pregnancy log not found")
+        await self._repo.delete_log(log)
+        await self._repo.flush()
 
     async def list_logs(self, user_id: UUID, pregnancy_id: UUID | None) -> list[RowOut]:
         return to_rows(await self._repo.list_logs(user_id, pregnancy_id))

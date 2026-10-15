@@ -502,17 +502,33 @@ class AdminService:
         row = (await self._repo.session.execute(select(DoctorProfile).where(DoctorProfile.id == doctor_id))).scalar_one_or_none()
         if row is None:
             raise not_found()
+        was_verified = bool(row.is_verified)
         row.is_verified = body.is_verified
         await self._log(admin, "doctor.verify", "Doctor verification updated", doctor_id=str(doctor_id))
         await self._repo.session.flush()
 
-        if body.is_verified:
+        if body.is_verified and not was_verified:
             await dispatch_notification(
                 db=self._repo.session,
                 user_id=doctor_id,
                 title="Profile Verified",
                 body="Your doctor profile has been verified! You can now start accepting patient bookings.",
                 type="doctor_verified",
+                data={
+                    "type": "doctor_profile",
+                    "screen": "doctor_profile",
+                    "route": "/doctor/profile",
+                    "resource_id": str(doctor_id),
+                },
+                is_urgent=True,
+            )
+        elif not body.is_verified and was_verified:
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=doctor_id,
+                title="Profile Verification Revoked",
+                body="Your doctor verification has been removed. You cannot accept new patient bookings at this time.",
+                type="doctor_unverified",
                 data={
                     "type": "doctor_profile",
                     "screen": "doctor_profile",

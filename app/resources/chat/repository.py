@@ -1,7 +1,8 @@
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.persistence.sqlalchemy.models import ChatConversation, ChatMessage, DoctorProfile, Profile
@@ -13,6 +14,7 @@ class ChatRepository(Protocol):
     async def get_for_patient(self, conversation_id: UUID, user_id: UUID) -> ChatConversation | None: ...
     async def get_for_doctor(self, conversation_id: UUID, user_id: UUID) -> ChatConversation | None: ...
     async def list_messages(self, conversation_id: UUID) -> list[ChatMessage]: ...
+    async def mark_messages_seen(self, conversation_id: UUID, exclude_sender_id: UUID) -> int: ...
     async def get_profile(self, user_id: UUID) -> Profile | None: ...
     async def get_doctor(self, user_id: UUID) -> DoctorProfile | None: ...
     def add(self, obj: object) -> None: ...
@@ -65,6 +67,19 @@ class SqlAlchemyChatRepository:
             .scalars()
             .all()
         )
+
+    async def mark_messages_seen(self, conversation_id: UUID, exclude_sender_id: UUID) -> int:
+        now = datetime.now(UTC)
+        res = await self._db.execute(
+            update(ChatMessage)
+            .where(
+                ChatMessage.conversation_id == conversation_id,
+                ChatMessage.sender_id != exclude_sender_id,
+                ChatMessage.is_seen.is_(False),
+            )
+            .values(is_seen=True, seen_at=now)
+        )
+        return int(res.rowcount or 0)
 
     async def get_profile(self, user_id: UUID) -> Profile | None:
         return (await self._db.execute(select(Profile).where(Profile.id == user_id))).scalar_one_or_none()

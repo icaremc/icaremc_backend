@@ -7,7 +7,12 @@ from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.pregnancies.repository import SqlAlchemyPregnancyRepository
-from app.resources.pregnancies.schemas import PregnancyIn, PregnancyLogIn, PregnancyUpdate
+from app.resources.pregnancies.schemas import (
+    PregnancyIn,
+    PregnancyLogIn,
+    PregnancyLogUpdate,
+    PregnancyUpdate,
+)
 from app.resources.pregnancies.service import PregnancyService
 
 router = APIRouter(tags=["mother"])
@@ -47,3 +52,17 @@ async def list_pregnancy_logs(
     user: RequirePatient, svc: PregnancyServiceDep, pregnancy_id: UUID | None = None
 ) -> list[RowOut]:
     return await svc.list_logs(user.id, pregnancy_id)
+
+
+@router.patch("/pregnancy-logs/{log_id}")
+async def update_pregnancy_log(
+    log_id: UUID, body: PregnancyLogUpdate, user: RequirePatient, svc: PregnancyServiceDep
+) -> RowOut:
+    return await svc.update_log(user.id, log_id, body)
+
+
+@router.delete("/pregnancy-logs/{log_id}", status_code=204)
+async def delete_pregnancy_log(
+    log_id: UUID, user: RequirePatient, svc: PregnancyServiceDep
+) -> None:
+    await svc.delete_log(user.id, log_id)

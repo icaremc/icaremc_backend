@@ -36,9 +36,28 @@ def test_pregnancy_and_logs(client, patient_auth):
         json={"pregnancy_id": preg_id, "week_number": 8, "weight": 62.5, "symptoms": ["nausea"]},
     )
     assert log.status_code == 200
+    log_id = log.json()["id"]
+
     logs = client.get("/api/v1/pregnancy-logs", headers=h, params={"pregnancy_id": preg_id})
     assert logs.status_code == 200
     assert len(logs.json()) == 1
+
+    # Update log
+    patch_res = client.patch(
+        f"/api/v1/pregnancy-logs/{log_id}",
+        headers=h,
+        json={"weight": 63.0, "notes": "Feeling much better"},
+    )
+    assert patch_res.status_code == 200
+    assert float(patch_res.json()["weight"]) == 63.0
+    assert patch_res.json()["notes"] == "Feeling much better"
+
+    # Delete log
+    del_res = client.delete(f"/api/v1/pregnancy-logs/{log_id}", headers=h)
+    assert del_res.status_code == 204
+
+    logs_after_delete = client.get("/api/v1/pregnancy-logs", headers=h, params={"pregnancy_id": preg_id})
+    assert len(logs_after_delete.json()) == 0
 
 
 def test_children_growth_milestones_vaccines(client, patient_auth):

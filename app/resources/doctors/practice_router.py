@@ -154,6 +154,12 @@ async def send_message(conversation_id: UUID, body: ChatIn, user: RequireDoctor,
     return await svc.send_doctor(conversation_id, user.id, body)
 
 
+@router.post("/chat/conversations/{conversation_id}/read")
+@router.post("/chat/conversations/{conversation_id}/seen")
+async def mark_doctor_chat_seen(conversation_id: UUID, user: RequireDoctor, svc: ChatDep) -> dict[str, object]:
+    return await svc.mark_read_doctor(conversation_id, user.id)
+
+
 @router.get("/notifications")
 async def notifications(user: RequireDoctor, svc: NotificationDep) -> list[RowOut]:
     return await svc.list_for_user(user.id)

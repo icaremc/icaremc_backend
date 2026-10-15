@@ -49,6 +49,12 @@ def test_two_way_chat_push_notifications(client, patient_auth, doctor_auth, admi
     )
     assert p_msg.status_code == 200
     assert p_msg.json()["body"] == "Hello Doctor! I have a question about my medication."
+    assert p_msg.json()["is_seen"] is False
+    assert p_msg.json()["seen_at"] is None
+
+    # Doctor fetches messages -> patient message is marked seen
+    doc_msgs = client.get(f"/api/v1/doctor/chat/conversations/{conv_id}/messages", headers=doctor_h).json()
+    assert any(m["id"] == p_msg.json()["id"] and m["is_seen"] is True for m in doc_msgs)
 
     # 6. Doctor replies -> triggers push to patient
     d_msg = client.post(
@@ -58,3 +64,13 @@ def test_two_way_chat_push_notifications(client, patient_auth, doctor_auth, admi
     )
     assert d_msg.status_code == 200
     assert d_msg.json()["body"] == "Please take it with food after breakfast."
+    assert d_msg.json()["is_seen"] is False
+
+    # Patient explicitly calls read/seen endpoint
+    read_res = client.post(f"/api/v1/chat/conversations/{conv_id}/read", headers=patient_h)
+    assert read_res.status_code == 200
+    assert read_res.json()["ok"] is True
+
+    # Patient fetches messages -> doctor message is seen
+    patient_msgs = client.get(f"/api/v1/chat/conversations/{conv_id}/messages", headers=patient_h).json()
+    assert any(m["id"] == d_msg.json()["id"] and m["is_seen"] is True for m in patient_msgs)

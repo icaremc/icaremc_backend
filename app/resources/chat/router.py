@@ -33,3 +33,9 @@ async def chat_messages(conversation_id: UUID, user: RequirePatient, svc: ChatSe
 @router.post("/chat/conversations/{conversation_id}/messages")
 async def send_chat(conversation_id: UUID, body: ChatIn, user: RequirePatient, svc: ChatServiceDep) -> RowOut:
     return await svc.send_patient(conversation_id, user.id, body)
+
+
+@router.post("/chat/conversations/{conversation_id}/read")
+@router.post("/chat/conversations/{conversation_id}/seen")
+async def mark_chat_seen(conversation_id: UUID, user: RequirePatient, svc: ChatServiceDep) -> dict[str, object]:
+    return await svc.mark_read_patient(conversation_id, user.id)

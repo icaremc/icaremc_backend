@@ -252,6 +252,8 @@ class ChatMessage(Base):
     )
     sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    is_seen: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -45,3 +45,14 @@ class PregnancyLogIn(BaseModel):
     temperature: Decimal | None = None
     symptoms: list[str] = Field(default_factory=list)
     notes: str | None = None
+
+
+class PregnancyLogUpdate(BaseModel):
+    week_number: int | None = None
+    weight: Decimal | None = None
+    height: Decimal | None = None
+    blood_pressure_systolic: int | None = None
+    blood_pressure_diastolic: int | None = None
+    temperature: Decimal | None = None
+    symptoms: list[str] | None = None
+    notes: str | None = None
