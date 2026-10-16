@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -63,3 +63,9 @@ class VaccineIn(BaseModel):
     age_months: int | None = None
     received: bool = False
     date_received: date | None = None
+
+
+class FollowupVisitPatchIn(BaseModel):
+    status: str | None = None
+    completed_at: datetime | None = None
+    checklist: dict[str, object] | None = None

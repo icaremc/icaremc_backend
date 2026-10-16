@@ -1,19 +1,48 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from app.api.v1.schemas import RowOut
 from app.persistence.sqlalchemy.models import (
     Child,
     ChildFollowupVisit,
+    ChildFollowupVisitTemplate,
     ChildGrowthMeasurement,
     ChildMilestoneCheck,
     ChildVaccineRecord,
 )
+from app.persistence.sqlalchemy.serialize import row_dict
 from app.resources.children.helpers import calculate_visit_due_date
 from app.resources.children.repository import ChildrenRepository
-from app.resources.children.schemas import ChildIn, ChildPatchIn, MeasurementIn, MilestoneIn, VaccineIn
+from app.resources.children.schemas import (
+    ChildIn,
+    ChildPatchIn,
+    FollowupVisitPatchIn,
+    MeasurementIn,
+    MilestoneIn,
+    VaccineIn,
+)
 from app.resources.errors import not_found
 from app.resources.serialize import require_row, to_rows
+
+
+def _serialize_visit_with_template(
+    visit: ChildFollowupVisit, template: ChildFollowupVisitTemplate | None
+) -> RowOut:
+    data = row_dict(visit)
+    if template is not None:
+        t_dict = row_dict(template)
+        data["template"] = t_dict
+        data["child_followup_visit_templates"] = t_dict
+        data["template_label"] = template.label
+        data["label"] = template.label
+        data["modules"] = template.modules
+        data["vaccines"] = template.vaccines
+        data["offset_days"] = template.offset_days
+        data["offset_months"] = template.offset_months
+    else:
+        data["template"] = None
+        data["child_followup_visit_templates"] = None
+    return RowOut.model_validate(data)
 
 
 class ChildrenService:
@@ -86,7 +115,7 @@ class ChildrenService:
         child_local_id = row.local_id or str(row.id)
         if row.birth_date:
             await self._generate_followup_visits(user_id, child_local_id, row.birth_date)
-        return to_rows(await self._repo.list_followups(user_id, child_local_id))
+        return await self.list_followups(user_id, child_local_id)
 
     async def delete_child(self, child_id: UUID, user_id: UUID) -> None:
         row = await self._repo.get_child(child_id, user_id)
@@ -136,4 +165,37 @@ class ChildrenService:
         return to_rows(await self._repo.list_vaccines(user_id, child_local_id))
 
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[RowOut]:
-        return to_rows(await self._repo.list_followups(user_id, child_local_id))
+        pairs = await self._repo.list_followups_with_template(user_id, child_local_id)
+        return [_serialize_visit_with_template(v, t) for v, t in pairs]
+
+    async def get_followup(self, visit_id: UUID, user_id: UUID) -> RowOut:
+        row = await self._repo.get_followup_with_template(visit_id, user_id)
+        if row is None:
+            raise not_found()
+        return _serialize_visit_with_template(row[0], row[1])
+
+    async def patch_followup(
+        self, visit_id: UUID, user_id: UUID, body: FollowupVisitPatchIn
+    ) -> RowOut:
+        visit = await self._repo.get_followup(visit_id, user_id)
+        if visit is None:
+            raise not_found()
+        for key, value in body.model_dump(exclude_unset=True).items():
+            if key == "checklist" and isinstance(value, dict):
+                current = dict(visit.checklist or {})
+                current.update(value)
+                visit.checklist = current
+            else:
+                setattr(visit, key, value)
+        if body.status == "completed" and visit.completed_at is None and body.completed_at is None:
+            visit.completed_at = datetime.now(timezone.utc)
+        elif body.status == "scheduled" and body.completed_at is None:
+            visit.completed_at = None
+        await self._repo.flush()
+        row = await self._repo.get_followup_with_template(visit_id, user_id)
+        if row is None:
+            return require_row(visit)
+        return _serialize_visit_with_template(row[0], row[1])
+
+    async def list_published_followup_templates(self) -> list[RowOut]:
+        return to_rows(await self._repo.list_published_followup_templates())

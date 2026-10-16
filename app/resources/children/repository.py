@@ -23,6 +23,13 @@ class ChildrenRepository(Protocol):
     async def list_vaccines(self, user_id: UUID, child_local_id: str) -> list[ChildVaccineRecord]: ...
     async def get_vaccine(self, user_id: UUID, child_local_id: str, vaccine_key: str) -> ChildVaccineRecord | None: ...
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[ChildFollowupVisit]: ...
+    async def list_followups_with_template(
+        self, user_id: UUID, child_local_id: str
+    ) -> list[tuple[ChildFollowupVisit, ChildFollowupVisitTemplate | None]]: ...
+    async def get_followup(self, visit_id: UUID, user_id: UUID) -> ChildFollowupVisit | None: ...
+    async def get_followup_with_template(
+        self, visit_id: UUID, user_id: UUID
+    ) -> tuple[ChildFollowupVisit, ChildFollowupVisitTemplate | None] | None: ...
     async def list_published_followup_templates(self) -> list[ChildFollowupVisitTemplate]: ...
     async def delete_child_associated_data(self, user_id: UUID, child_local_id: str) -> None: ...
     def add(self, obj: object) -> None: ...
@@ -108,6 +115,49 @@ class SqlAlchemyChildrenRepository:
             .scalars()
             .all()
         )
+
+    async def list_followups_with_template(
+        self, user_id: UUID, child_local_id: str
+    ) -> list[tuple[ChildFollowupVisit, ChildFollowupVisitTemplate | None]]:
+        stmt = (
+            select(ChildFollowupVisit, ChildFollowupVisitTemplate)
+            .outerjoin(
+                ChildFollowupVisitTemplate,
+                ChildFollowupVisit.template_id == ChildFollowupVisitTemplate.id,
+            )
+            .where(
+                ChildFollowupVisit.user_id == user_id,
+                ChildFollowupVisit.child_local_id == child_local_id,
+            )
+            .order_by(ChildFollowupVisit.due_date.asc().nulls_last())
+        )
+        return list((await self._db.execute(stmt)).all())
+
+    async def get_followup(self, visit_id: UUID, user_id: UUID) -> ChildFollowupVisit | None:
+        return (
+            await self._db.execute(
+                select(ChildFollowupVisit).where(
+                    ChildFollowupVisit.id == visit_id,
+                    ChildFollowupVisit.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def get_followup_with_template(
+        self, visit_id: UUID, user_id: UUID
+    ) -> tuple[ChildFollowupVisit, ChildFollowupVisitTemplate | None] | None:
+        stmt = (
+            select(ChildFollowupVisit, ChildFollowupVisitTemplate)
+            .outerjoin(
+                ChildFollowupVisitTemplate,
+                ChildFollowupVisit.template_id == ChildFollowupVisitTemplate.id,
+            )
+            .where(
+                ChildFollowupVisit.id == visit_id,
+                ChildFollowupVisit.user_id == user_id,
+            )
+        )
+        return (await self._db.execute(stmt)).first()
 
     async def list_published_followup_templates(self) -> list[ChildFollowupVisitTemplate]:
         return list(

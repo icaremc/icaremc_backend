@@ -178,3 +178,107 @@ def test_delete_child(client, patient_auth):
     assert client.get("/api/v1/child-followups", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
 
 
+def test_followup_visit_checklist_and_patch(client, patient_auth):
+    h = auth_header(patient_auth["token"])
+
+    # Seed a template with rich checklist/modules and vaccines
+    async def _seed_template():
+        async with async_session_factory() as db:
+            tmpl = ChildFollowupVisitTemplate(
+                code=f"visit_test_{uuid4().hex[:6]}",
+                label="2 months checkup",
+                sort_order=1,
+                offset_days=60,
+                modules={
+                    "growth": True,
+                    "vaccines": True,
+                    "nutrition": True,
+                    "red_flags": True,
+                    "development": True,
+                },
+                vaccines=[{"name": "Penta 1", "route": "Intramuscular"}],
+                is_published=True,
+            )
+            db.add(tmpl)
+            await db.commit()
+            return str(tmpl.id)
+
+    tmpl_id = asyncio.run(_seed_template())
+
+    # Patient can list published followup templates
+    templates_res = client.get("/api/v1/followup-templates", headers=h)
+    assert templates_res.status_code == 200
+    all_tmpls = templates_res.json()
+    assert any(t["id"] == tmpl_id for t in all_tmpls)
+
+    # Create child
+    create_res = client.post(
+        "/api/v1/children",
+        headers=h,
+        json={
+            "local_id": "baby-checklist-test",
+            "name": "Checklist Baby",
+            "gender": "male",
+            "birth_date": "2026-05-01",
+        },
+    )
+    assert create_res.status_code == 200
+
+    # Fetch followups for the child
+    followups_res = client.get(
+        "/api/v1/child-followups",
+        headers=h,
+        params={"child_local_id": "baby-checklist-test"},
+    )
+    assert followups_res.status_code == 200
+    visits = followups_res.json()
+    visit = next(v for v in visits if v["template_id"] == tmpl_id)
+
+    # Verify template details are included on the visit
+    assert visit["template"] is not None
+    assert visit["template"]["id"] == tmpl_id
+    assert visit["template"]["label"] == "2 months checkup"
+    assert visit["template"]["modules"]["development"] is True
+    assert visit["label"] == "2 months checkup"
+    assert visit["modules"]["development"] is True
+    assert len(visit["vaccines"]) == 1
+    assert visit["status"] == "scheduled"
+    assert visit["completed_at"] is None
+    visit_id = visit["id"]
+
+    # Get single followup by ID
+    single_res = client.get(f"/api/v1/child-followups/{visit_id}", headers=h)
+    assert single_res.status_code == 200
+    single = single_res.json()
+    assert single["id"] == visit_id
+    assert single["template"]["label"] == "2 months checkup"
+
+    # Patch checklist responses and mark visit completed
+    checklist_answers = {
+        "notes": "Child is feeding and sleeping well.",
+        "growth_done": True,
+        "vaccines_done": True,
+        "nutrition_done": True,
+        "counseling_done": True,
+        "development_done": True,
+        "red_flags_reviewed": True,
+        "red_flags_concern": False,
+    }
+    patch_res = client.patch(
+        f"/api/v1/child-followups/{visit_id}",
+        headers=h,
+        json={
+            "status": "completed",
+            "checklist": checklist_answers,
+        },
+    )
+    assert patch_res.status_code == 200
+    patched = patch_res.json()
+    assert patched["status"] == "completed"
+    assert patched["completed_at"] is not None
+    assert patched["checklist"]["growth_done"] is True
+    assert patched["checklist"]["notes"] == "Child is feeding and sleeping well."
+    assert patched["template"]["label"] == "2 months checkup"
+
+
+

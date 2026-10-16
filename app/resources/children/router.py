@@ -7,7 +7,14 @@ from app.api.v1.schemas import OkOut, RowOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.children.repository import SqlAlchemyChildrenRepository
-from app.resources.children.schemas import ChildIn, ChildPatchIn, MeasurementIn, MilestoneIn, VaccineIn
+from app.resources.children.schemas import (
+    ChildIn,
+    ChildPatchIn,
+    FollowupVisitPatchIn,
+    MeasurementIn,
+    MilestoneIn,
+    VaccineIn,
+)
 from app.resources.children.service import ChildrenService
 
 router = APIRouter(tags=["mother"])
@@ -79,6 +86,25 @@ async def list_vaccines(user: RequirePatient, child_local_id: str, svc: Children
 @router.get("/child-followups")
 async def list_followups(user: RequirePatient, child_local_id: str, svc: ChildrenServiceDep) -> list[RowOut]:
     return await svc.list_followups(user.id, child_local_id)
+
+
+@router.get("/child-followups/{visit_id}")
+async def get_followup(visit_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
+    return await svc.get_followup(visit_id, user.id)
+
+
+@router.patch("/child-followups/{visit_id}")
+@router.put("/child-followups/{visit_id}")
+async def patch_followup(
+    visit_id: UUID, body: FollowupVisitPatchIn, user: RequirePatient, svc: ChildrenServiceDep
+) -> RowOut:
+    return await svc.patch_followup(visit_id, user.id, body)
+
+
+@router.get("/followup-templates")
+@router.get("/child-followup-templates")
+async def list_published_followup_templates(user: RequirePatient, svc: ChildrenServiceDep) -> list[RowOut]:
+    return await svc.list_published_followup_templates()
 
 
 @router.post("/children/{child_id}/backfill-followups")
