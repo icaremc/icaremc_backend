@@ -22,6 +22,7 @@ class AppointmentRepository(Protocol):
     async def list_for_doctor(self, doctor_id: UUID) -> list[Appointment]: ...
     async def get_for_doctor(self, appointment_id: UUID, doctor_id: UUID) -> Appointment | None: ...
     async def list_reviews_for_doctor(self, doctor_id: UUID) -> list[AppointmentReview]: ...
+    async def get_review_by_appointment(self, appointment_id: UUID) -> AppointmentReview | None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
     @property
@@ -73,6 +74,13 @@ class SqlAlchemyAppointmentRepository:
             .scalars()
             .all()
         )
+
+    async def get_review_by_appointment(self, appointment_id: UUID) -> AppointmentReview | None:
+        return (
+            await self.session.execute(
+                select(AppointmentReview).where(AppointmentReview.appointment_id == appointment_id)
+            )
+        ).scalar_one_or_none()
 
     def add(self, obj: object) -> None:
         self.session.add(obj)

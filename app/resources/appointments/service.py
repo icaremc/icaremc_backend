@@ -203,6 +203,12 @@ class AppointmentService:
         appt = await self._repo.get_for_patient(body.appointment_id, user_id)
         if appt is None:
             raise not_found()
+        existing = await self._repo.get_review_by_appointment(body.appointment_id)
+        if existing is not None:
+            existing.rating = body.rating
+            existing.comment = body.comment
+            await self._repo.flush()
+            return require_row(existing)
         row = AppointmentReview(
             appointment_id=appt.id,
             service_id=appt.service_id,
