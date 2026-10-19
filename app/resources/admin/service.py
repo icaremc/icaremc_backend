@@ -1,5 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, or_, select
 
@@ -8,6 +8,7 @@ def _escape_like(val: str) -> str:
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import AuthUser
+from app.resources.payments.service import execute_chapa_transfer
 from app.persistence.sqlalchemy.models import (
     AdminActivityLog,
     AdminDocument,
@@ -38,13 +39,15 @@ from app.persistence.sqlalchemy.models import (
     DoctorWallet,
     Hospital,
     LegalDocument,
+    PatientPayoutMethod,
+    PatientWallet,
+    PatientWalletTransaction,
+    PatientWalletWithdrawalRequest,
     PlatformActivityLog,
     Pregnancy,
     PregnancyWeek,
     PregnancyWeekTranslation,
     Profile,
-    PatientWallet,
-    PatientWalletTransaction,
     SymptomCatalog,
     User,
     VaccineDoseSchedule,
@@ -786,18 +789,38 @@ class AdminService:
                     payout_request_id=req.id,
                 )
             )
-        elif body.status == "completed" and req.status in ("pending", "approved"):
-            wallet.pending_balance -= req.amount
-            self._repo.session.add(
-                WalletTransaction(
-                    doctor_id=req.doctor_id,
+        elif body.status in ("approved", "completed"):
+            if not req.chapa_transfer_reference:
+                method = (
+                    await self._repo.session.execute(
+                        select(DoctorPayoutMethod).where(DoctorPayoutMethod.id == req.payout_method_id)
+                    )
+                ).scalar_one_or_none()
+                if method is None:
+                    raise bad_request("Doctor payout method not found")
+                reference = f"doc-payout-{req.id.hex[:12]}-{uuid4().hex[:6]}"
+                await execute_chapa_transfer(
+                    account_name=method.holder_name,
+                    account_number=method.account_number,
                     amount=req.amount,
-                    is_credit=False,
-                    type="payout_paid",
-                    payout_request_id=req.id,
+                    currency=method.currency or "ETB",
+                    bank_code=method.bank_code or "telebirr",
+                    reference=reference,
                 )
-            )
-            req.payment_date = datetime.now(UTC)
+                req.chapa_transfer_reference = reference
+
+            if req.status == "pending":
+                wallet.pending_balance -= req.amount
+                self._repo.session.add(
+                    WalletTransaction(
+                        doctor_id=req.doctor_id,
+                        amount=req.amount,
+                        is_credit=False,
+                        type="payout_paid",
+                        payout_request_id=req.id,
+                    )
+                )
+                req.payment_date = datetime.now(UTC)
         req.status = body.status
         req.admin_note = body.admin_note
         if admin is not None:
@@ -843,6 +866,155 @@ class AdminService:
                     "type": "payout",
                     "screen": "doctor_wallet",
                     "route": "/doctor/wallet",
+                    "resource_id": str(req.id),
+                },
+                is_urgent=True,
+            )
+
+        return require_row(req)
+
+    async def list_patient_withdrawals(self) -> list[RowOut]:
+        rows = (
+            await self._repo.session.execute(
+                select(PatientWalletWithdrawalRequest).order_by(PatientWalletWithdrawalRequest.created_at.desc())
+            )
+        ).scalars().all()
+        return to_rows(list(rows))
+
+    async def get_patient_withdrawal_review(self, request_id: UUID) -> dict[str, object]:
+        req = (
+            await self._repo.session.execute(
+                select(PatientWalletWithdrawalRequest).where(PatientWalletWithdrawalRequest.id == request_id)
+            )
+        ).scalar_one_or_none()
+        if req is None:
+            raise not_found("Patient withdrawal request not found")
+
+        patient = (
+            await self._repo.session.execute(select(Profile).where(Profile.id == req.patient_id))
+        ).scalar_one_or_none()
+        wallet = (
+            await self._repo.session.execute(select(PatientWallet).where(PatientWallet.patient_id == req.patient_id))
+        ).scalar_one_or_none()
+        payout_method = None
+        if req.payout_method_id:
+            payout_method = (
+                await self._repo.session.execute(
+                    select(PatientPayoutMethod).where(PatientPayoutMethod.id == req.payout_method_id)
+                )
+            ).scalar_one_or_none()
+
+        return {
+            "request": {
+                "id": str(req.id),
+                "patient_id": str(req.patient_id),
+                "amount": float(req.amount),
+                "status": req.status,
+                "created_at": req.created_at.isoformat() if req.created_at else None,
+                "note": req.note,
+                "admin_note": req.admin_note,
+                "payment_date": req.payment_date.isoformat() if req.payment_date else None,
+                "chapa_transfer_reference": req.chapa_transfer_reference,
+            },
+            "patient": require_row(patient).model_dump() if patient else None,
+            "wallet": require_row(wallet).model_dump() if wallet else None,
+            "payout_method": require_row(payout_method).model_dump() if payout_method else None,
+        }
+
+    async def action_patient_withdrawal(
+        self, request_id: UUID, body: PayoutActionIn, admin: AuthUser | None = None
+    ) -> RowOut:
+        req = (
+            await self._repo.session.execute(
+                select(PatientWalletWithdrawalRequest).where(PatientWalletWithdrawalRequest.id == request_id)
+            )
+        ).scalar_one_or_none()
+        if req is None:
+            raise not_found("Patient withdrawal request not found")
+
+        wallet = (
+            await self._repo.session.execute(select(PatientWallet).where(PatientWallet.patient_id == req.patient_id))
+        ).scalar_one_or_none()
+
+        if body.status == "rejected" and req.status == "pending":
+            if wallet is not None:
+                wallet.balance += req.amount
+            self._repo.session.add(
+                PatientWalletTransaction(
+                    patient_id=req.patient_id,
+                    amount=req.amount,
+                    is_credit=True,
+                    type="withdrawal_refund",
+                    note=f"Refunded rejected withdrawal: {body.admin_note or ''}",
+                )
+            )
+        elif body.status in ("approved", "completed"):
+            if not req.chapa_transfer_reference:
+                method = None
+                if req.payout_method_id:
+                    method = (
+                        await self._repo.session.execute(
+                            select(PatientPayoutMethod).where(PatientPayoutMethod.id == req.payout_method_id)
+                        )
+                    ).scalar_one_or_none()
+                if method is None:
+                    raise bad_request("Patient payout method not found")
+                reference = f"pat-payout-{req.id.hex[:12]}-{uuid4().hex[:6]}"
+                await execute_chapa_transfer(
+                    account_name=method.holder_name,
+                    account_number=method.account_number,
+                    amount=req.amount,
+                    currency=method.currency or "ETB",
+                    bank_code=method.bank_code or "telebirr",
+                    reference=reference,
+                )
+                req.chapa_transfer_reference = reference
+                req.payment_date = datetime.now(UTC)
+
+        req.status = body.status
+        req.admin_note = body.admin_note
+        if admin is not None:
+            await self._log(
+                admin,
+                "patient_withdrawal.action",
+                f"Patient withdrawal request {body.status}",
+                resource_type="patient_withdrawal",
+                resource_id=str(request_id),
+                request_id=str(request_id),
+                status=body.status,
+                patient_id=str(req.patient_id),
+                amount=float(req.amount),
+            )
+        await self._repo.session.flush()
+
+        if body.status in ("approved", "completed"):
+            action_label = "approved" if body.status == "approved" else "completed"
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=req.patient_id,
+                title=f"Withdrawal {action_label.capitalize()}",
+                body=f"Your withdrawal request of {req.amount} ETB has been {action_label}.",
+                type="patient_withdrawal",
+                data={
+                    "type": "withdrawal",
+                    "screen": "patient_wallet",
+                    "route": "/wallet",
+                    "resource_id": str(req.id),
+                },
+                is_urgent=True,
+            )
+        elif body.status == "rejected":
+            note_suffix = f" Reason: {body.admin_note}" if body.admin_note else ""
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=req.patient_id,
+                title="Withdrawal Rejected",
+                body=f"Your withdrawal request of {req.amount} ETB was rejected.{note_suffix}",
+                type="patient_withdrawal",
+                data={
+                    "type": "withdrawal",
+                    "screen": "patient_wallet",
+                    "route": "/wallet",
                     "resource_id": str(req.id),
                 },
                 is_urgent=True,

@@ -280,6 +280,23 @@ async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdm
     return await svc.payout_action(request_id, body, admin=user)
 
 
+@finance_router.get("/patient-withdrawals")
+async def list_patient_withdrawals(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
+    return await svc.list_patient_withdrawals()
+
+
+@finance_router.get("/patient-withdrawals/{request_id}")
+async def get_patient_withdrawal_review(request_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
+    return await svc.get_patient_withdrawal_review(request_id)
+
+
+@finance_router.post("/patient-withdrawals/{request_id}")
+async def action_patient_withdrawal(
+    request_id: UUID, body: PayoutActionIn, user: RequireAdmin, svc: AdminDep
+) -> RowOut:
+    return await svc.action_patient_withdrawal(request_id, body, admin=user)
+
+
 @finance_router.get("/wallet-transactions")
 async def wallet_transactions(
     user: RequireAdmin,

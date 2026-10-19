@@ -30,6 +30,8 @@ class PracticeRepository(Protocol):
     async def get_wallet(self, user_id: UUID) -> DoctorWallet | None: ...
     async def list_wallet_txs(self, user_id: UUID) -> list[WalletTransaction]: ...
     async def list_payout_methods(self, user_id: UUID) -> list[DoctorPayoutMethod]: ...
+    async def get_payout_method(self, method_id: UUID, user_id: UUID) -> DoctorPayoutMethod | None: ...
+    async def unset_default_payout_methods(self, user_id: UUID, exclude_id: UUID | None = None) -> None: ...
     async def list_payouts(self, user_id: UUID) -> list[DoctorPayoutRequest]: ...
     async def list_referrals(self, user_id: UUID) -> list[DoctorReferral]: ...
     async def list_commissions(self, user_id: UUID) -> list[DoctorReferralCommission]: ...
@@ -124,6 +126,26 @@ class SqlAlchemyPracticeRepository:
             .scalars()
             .all()
         )
+
+    async def get_payout_method(self, method_id: UUID, user_id: UUID) -> DoctorPayoutMethod | None:
+        return (
+            await self.session.execute(
+                select(DoctorPayoutMethod).where(
+                    DoctorPayoutMethod.id == method_id,
+                    DoctorPayoutMethod.doctor_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def unset_default_payout_methods(self, user_id: UUID, exclude_id: UUID | None = None) -> None:
+        stmt = select(DoctorPayoutMethod).where(
+            DoctorPayoutMethod.doctor_id == user_id,
+            DoctorPayoutMethod.is_default.is_(True),
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(DoctorPayoutMethod.id != exclude_id)
+        for m in (await self.session.execute(stmt)).scalars().all():
+            m.is_default = False
 
     async def list_payouts(self, user_id: UUID) -> list[DoctorPayoutRequest]:
         return list(

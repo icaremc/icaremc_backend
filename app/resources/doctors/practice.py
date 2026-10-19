@@ -12,6 +12,7 @@ from app.resources.doctors.practice_repository import PracticeRepository
 from app.resources.doctors.practice_schemas import (
     PayoutIn,
     PayoutMethodIn,
+    PayoutMethodUpdate,
     ProfileUpdate,
     ServiceIn,
     SlotIn,
@@ -91,8 +92,30 @@ class PracticeService:
         return to_rows(await self._repo.list_payout_methods(user_id))
 
     async def create_payout_method(self, user_id: UUID, body: PayoutMethodIn) -> RowOut:
+        if body.is_default:
+            await self._repo.unset_default_payout_methods(user_id)
         row = DoctorPayoutMethod(doctor_id=user_id, **body.model_dump())
         self._repo.add(row)
+        await self._repo.flush()
+        return require_row(row)
+
+    async def update_payout_method(self, user_id: UUID, method_id: UUID, body: PayoutMethodUpdate) -> RowOut:
+        row = await self._repo.get_payout_method(method_id, user_id)
+        if row is None:
+            raise not_found()
+        data = body.model_dump(exclude_unset=True)
+        if data.get("is_default"):
+            await self._repo.unset_default_payout_methods(user_id, exclude_id=method_id)
+        for k, v in data.items():
+            setattr(row, k, v)
+        await self._repo.flush()
+        return require_row(row)
+
+    async def delete_payout_method(self, user_id: UUID, method_id: UUID) -> RowOut:
+        row = await self._repo.get_payout_method(method_id, user_id)
+        if row is None:
+            raise not_found()
+        await self._repo.delete(row)
         await self._repo.flush()
         return require_row(row)
 

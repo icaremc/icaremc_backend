@@ -17,6 +17,7 @@ from app.resources.doctors.practice_repository import SqlAlchemyPracticeReposito
 from app.resources.doctors.practice_schemas import (
     PayoutIn,
     PayoutMethodIn,
+    PayoutMethodUpdate,
     ProfileUpdate,
     ServiceIn,
     SlotIn,
@@ -112,6 +113,18 @@ async def payout_methods(user: RequireDoctor, svc: PracticeDep) -> list[RowOut]:
 @router.post("/payout-methods")
 async def create_payout_method(body: PayoutMethodIn, user: RequireDoctor, svc: PracticeDep) -> RowOut:
     return await svc.create_payout_method(user.id, body)
+
+
+@router.patch("/payout-methods/{method_id}")
+async def update_payout_method(
+    method_id: UUID, body: PayoutMethodUpdate, user: RequireDoctor, svc: PracticeDep
+) -> RowOut:
+    return await svc.update_payout_method(user.id, method_id, body)
+
+
+@router.delete("/payout-methods/{method_id}")
+async def delete_payout_method(method_id: UUID, user: RequireDoctor, svc: PracticeDep) -> RowOut:
+    return await svc.delete_payout_method(user.id, method_id)
 
 
 @router.post("/payouts")

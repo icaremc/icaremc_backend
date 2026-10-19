@@ -75,6 +75,7 @@ class DoctorPayoutRequest(Base):
     admin_note: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default="pending", server_default=text("'pending'"))
     payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    chapa_transfer_reference: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -133,6 +134,27 @@ class PatientWalletTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PatientPayoutMethod(Base):
+    __tablename__ = "patient_payout_methods"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    holder_name: Mapped[str] = mapped_column(Text, nullable=False)
+    account_number: Mapped[str] = mapped_column(Text, nullable=False)
+    bank_name: Mapped[str] = mapped_column(Text, nullable=False)
+    bank_code: Mapped[str | None] = mapped_column(Text)
+    swift_code: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    currency: Mapped[str] = mapped_column(String(8), default="ETB", server_default=text("'ETB'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class PatientWalletWithdrawalRequest(Base):
     __tablename__ = "patient_wallet_withdrawal_requests"
 
@@ -140,9 +162,15 @@ class PatientWalletWithdrawalRequest(Base):
     patient_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
+    payout_method_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patient_payout_methods.id", ondelete="SET NULL")
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="pending", server_default=text("'pending'"))
     note: Mapped[str | None] = mapped_column(Text)
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    payment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    chapa_transfer_reference: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

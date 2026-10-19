@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Mapping
+from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 import httpx
@@ -58,6 +58,25 @@ class PaymentService:
             data = resp.json()
             checkout_url = (data.get("data") or {}).get("checkout_url")
         return PaymentInitiateOut(tx_ref=tx_ref, checkout_url=checkout_url, chapa=data)
+
+    async def execute_transfer(
+        self,
+        *,
+        account_name: str,
+        account_number: str,
+        amount: Decimal,
+        currency: str = "ETB",
+        bank_code: str | None = None,
+        reference: str,
+    ) -> dict[str, Any]:
+        return await execute_chapa_transfer(
+            account_name=account_name,
+            account_number=account_number,
+            amount=amount,
+            currency=currency,
+            bank_code=bank_code,
+            reference=reference,
+        )
 
     def _verify_webhook_signature(self, raw_body: bytes, chapa_signature: str | None) -> None:
         import hmac
@@ -228,3 +247,56 @@ class PaymentService:
             return PaymentWebhookOut(type="care_subscription")
 
         return PaymentWebhookOut(unmatched=True)
+
+
+async def execute_chapa_transfer(
+    *,
+    account_name: str,
+    account_number: str,
+    amount: Decimal,
+    currency: str = "ETB",
+    bank_code: str | None = None,
+    reference: str,
+) -> dict[str, Any]:
+    """
+    Executes a transfer/disbursement to a bank or Telebirr account using Chapa's Transfers API.
+    If CHAPA_SECRET_KEY is empty (e.g. testing / development), simulates a successful transfer.
+    """
+    code = bank_code or "telebirr"
+
+    payload: dict[str, Any] = {
+        "account_name": account_name,
+        "account_number": str(account_number),
+        "amount": str(amount),
+        "currency": currency,
+        "reference": reference,
+        "bank_code": code,
+    }
+
+    if not MySettings.CHAPA_SECRET_KEY:
+        return {
+            "status": "success",
+            "message": "Transfer queued successfully (simulated)",
+            "data": {
+                "reference": reference,
+                "status": "success",
+                "simulated": True,
+            },
+        }
+
+    url = f"{MySettings.CHAPA_BASE_URL.rstrip('/')}/transfers"
+    headers = {
+        "Authorization": f"Bearer {MySettings.CHAPA_SECRET_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            data = resp.json() if resp.content else {}
+            if resp.status_code >= 400 or data.get("status") not in ("success", "successful"):
+                err_msg = data.get("message") or f"Chapa transfer failed with status {resp.status_code}"
+                raise bad_request(f"Chapa transfer error: {err_msg}")
+            return data
+    except httpx.RequestError as exc:
+        raise bad_request(f"Chapa network error: {str(exc)}") from exc

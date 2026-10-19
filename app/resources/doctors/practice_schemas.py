@@ -59,6 +59,17 @@ class PayoutMethodIn(BaseModel):
     currency: str = "ETB"
 
 
+class PayoutMethodUpdate(BaseModel):
+    holder_name: str | None = None
+    account_number: str | None = None
+    bank_name: str | None = None
+    bank_code: str | None = None
+    swift_code: str | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+    currency: str | None = None
+
+
 class PayoutIn(BaseModel):
     amount: Decimal
     payout_method_id: UUID
