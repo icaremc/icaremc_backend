@@ -220,3 +220,29 @@ class AppointmentService:
         self._repo.add(row)
         await self._repo.flush()
         return require_row(row)
+
+    async def list_reviews(
+        self,
+        *,
+        user_id: UUID | None = None,
+        patient_id: UUID | None = None,
+        doctor_id: UUID | None = None,
+        appointment_id: UUID | None = None,
+        mine: bool | None = None,
+    ) -> list[RowOut]:
+        effective_patient_id = user_id if (mine is True or (mine is None and doctor_id is None)) else patient_id
+        reviews = await self._repo.list_reviews(
+            patient_id=effective_patient_id,
+            doctor_id=doctor_id,
+            appointment_id=appointment_id,
+        )
+        return to_rows(reviews)
+
+    async def get_appointment_review(self, appointment_id: UUID, user_id: UUID) -> RowOut:
+        appt = await self._repo.get_for_patient(appointment_id, user_id)
+        if appt is None:
+            raise not_found()
+        review = await self._repo.get_review_by_appointment(appointment_id)
+        if review is None:
+            raise not_found("Review not found")
+        return require_row(review)

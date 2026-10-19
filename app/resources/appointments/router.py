@@ -38,3 +38,26 @@ async def cancel_appointment(appointment_id: UUID, user: RequirePatient, svc: Ap
 @router.post("/reviews")
 async def create_review(body: ReviewIn, user: RequirePatient, svc: AppointmentServiceDep) -> RowOut:
     return await svc.create_review(user.id, body)
+
+
+@router.get("/reviews")
+async def list_reviews(
+    user: RequirePatient,
+    svc: AppointmentServiceDep,
+    appointment_id: UUID | None = None,
+    doctor_id: UUID | None = None,
+    mine: bool | None = None,
+) -> list[RowOut]:
+    return await svc.list_reviews(
+        user_id=user.id,
+        appointment_id=appointment_id,
+        doctor_id=doctor_id,
+        mine=mine,
+    )
+
+
+@router.get("/appointments/{appointment_id}/review")
+async def get_appointment_review(
+    appointment_id: UUID, user: RequirePatient, svc: AppointmentServiceDep
+) -> RowOut:
+    return await svc.get_appointment_review(appointment_id, user.id)

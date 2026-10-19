@@ -23,6 +23,13 @@ class AppointmentRepository(Protocol):
     async def get_for_doctor(self, appointment_id: UUID, doctor_id: UUID) -> Appointment | None: ...
     async def list_reviews_for_doctor(self, doctor_id: UUID) -> list[AppointmentReview]: ...
     async def get_review_by_appointment(self, appointment_id: UUID) -> AppointmentReview | None: ...
+    async def list_reviews(
+        self,
+        *,
+        patient_id: UUID | None = None,
+        doctor_id: UUID | None = None,
+        appointment_id: UUID | None = None,
+    ) -> list[AppointmentReview]: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
     @property
@@ -81,6 +88,23 @@ class SqlAlchemyAppointmentRepository:
                 select(AppointmentReview).where(AppointmentReview.appointment_id == appointment_id)
             )
         ).scalar_one_or_none()
+
+    async def list_reviews(
+        self,
+        *,
+        patient_id: UUID | None = None,
+        doctor_id: UUID | None = None,
+        appointment_id: UUID | None = None,
+    ) -> list[AppointmentReview]:
+        stmt = select(AppointmentReview)
+        if patient_id is not None:
+            stmt = stmt.where(AppointmentReview.patient_id == patient_id)
+        if doctor_id is not None:
+            stmt = stmt.where(AppointmentReview.doctor_id == doctor_id)
+        if appointment_id is not None:
+            stmt = stmt.where(AppointmentReview.appointment_id == appointment_id)
+        stmt = stmt.order_by(AppointmentReview.created_at.desc())
+        return list((await self.session.execute(stmt)).scalars().all())
 
     def add(self, obj: object) -> None:
         self.session.add(obj)
