@@ -41,13 +41,27 @@ async def get_banks(svc: PaymentServiceDep) -> ChapaBanksOut:
     return await svc.get_banks()
 
 
+@router.get("/chapa/transfer-approval")
+@router.get("/transfer-approval")
+async def chapa_transfer_approval_get() -> dict[str, str]:
+    return {"status": "ok", "message": "Transfer approval endpoint active"}
+
+
 @router.post("/chapa/transfer-approval")
 @router.post("/transfer-approval")
 async def chapa_transfer_approval(
     request: Request,
     svc: PaymentServiceDep,
 ) -> dict[str, Any]:
-    sig = request.headers.get("chapa-signature") or request.headers.get("x-chapa-signature")
+    sig = (
+        request.headers.get("chapa-signature")
+        or request.headers.get("x-chapa-signature")
+        or request.headers.get("x-chapa-secret")
+        or request.headers.get("authorization")
+    )
     raw_body = await request.body()
-    body = await request.json() if raw_body else {}
+    try:
+        body = await request.json() if raw_body else {}
+    except Exception:
+        body = {}
     return await svc.handle_transfer_approval(raw_body, body, sig)

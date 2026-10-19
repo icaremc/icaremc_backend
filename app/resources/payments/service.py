@@ -97,25 +97,70 @@ class PaymentService:
         # elif MySettings.CHAPA_SECRET_KEY or MySettings.ENVIRONMENT != EnvironmentOptions.DEVELOPMENT:
         #     raise unauthorized("Webhook secret required")
 
-    def _verify_transfer_approval_signature(self, raw_body: bytes, chapa_signature: str | None) -> None:
-        import hmac
+    def _verify_transfer_approval_signature(
+        self, raw_body: bytes, body: Mapping[str, Any], chapa_signature: str | None
+    ) -> None:
         import hashlib
-        secret = MySettings.CHAPA_TRANSFER_APPROVAL_SECRET or MySettings.CHAPA_WEBHOOK_SECRET
-        if secret:
-            if not chapa_signature:
-                raise unauthorized("Missing approval signature")
-            expected_hash = hmac.new(
-                secret.encode(),
-                raw_body,
-                hashlib.sha256
-            ).hexdigest()
-            if chapa_signature != expected_hash and chapa_signature != secret:
-                raise unauthorized("Bad approval signature")
+        import hmac
+        import json
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        secret = (MySettings.CHAPA_TRANSFER_APPROVAL_SECRET or MySettings.CHAPA_WEBHOOK_SECRET).strip()
+        if not secret:
+            return
+
+        # If Chapa sends an empty ping or setup check when saving the URL in the dashboard
+        if not raw_body or body.get("event") == "ping" or body.get("type") == "test":
+            return
+
+        if not chapa_signature:
+            logger.warning("Chapa transfer approval received without signature header")
+            raise unauthorized("Missing approval signature")
+
+        sig = chapa_signature.strip()
+        if sig.lower().startswith("bearer "):
+            sig = sig[7:].strip()
+
+        # 1. Direct secret match
+        if sig == secret:
+            return
+
+        # 2. HMAC over raw request bytes
+        expected_raw = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(sig, expected_raw):
+            return
+
+        # 3. HMAC over compact JSON
+        try:
+            compact_json = json.dumps(body, separators=(",", ":")).encode("utf-8")
+            expected_compact = hmac.new(secret.encode(), compact_json, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(sig, expected_compact):
+                return
+        except Exception:
+            pass
+
+        # 4. HMAC over standard JSON
+        try:
+            standard_json = json.dumps(body).encode("utf-8")
+            expected_std = hmac.new(secret.encode(), standard_json, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(sig, expected_std):
+                return
+        except Exception:
+            pass
+
+        logger.warning(
+            "Chapa transfer approval signature mismatch. Received: %s, Expected: %s",
+            sig,
+            expected_raw,
+        )
+        raise unauthorized("Bad approval signature")
 
     async def handle_transfer_approval(
         self, raw_body: bytes, body: Mapping[str, Any], chapa_signature: str | None
     ) -> dict[str, Any]:
-        self._verify_transfer_approval_signature(raw_body, chapa_signature)
+        self._verify_transfer_approval_signature(raw_body, body, chapa_signature)
         reference = body.get("reference")
         if reference:
             await self._repo.find_payout_by_reference(str(reference))
