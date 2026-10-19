@@ -78,6 +78,9 @@ class PaymentService:
             reference=reference,
         )
 
+    async def get_banks(self) -> dict[str, Any]:
+        return await fetch_chapa_banks()
+
     def _verify_webhook_signature(self, raw_body: bytes, chapa_signature: str | None) -> None:
         import hmac
         import hashlib
@@ -298,5 +301,65 @@ async def execute_chapa_transfer(
                 err_msg = data.get("message") or f"Chapa transfer failed with status {resp.status_code}"
                 raise bad_request(f"Chapa transfer error: {err_msg}")
             return data
+    except httpx.RequestError as exc:
+        raise bad_request(f"Chapa network error: {str(exc)}") from exc
+
+
+async def fetch_chapa_banks() -> dict[str, Any]:
+    """
+    Fetches the list of supported banks and bank codes from the Chapa API.
+    """
+    if not MySettings.CHAPA_SECRET_KEY:
+        raise bad_request("Chapa secret key is not configured")
+
+    url = f"{MySettings.CHAPA_BASE_URL.rstrip('/')}/banks"
+    headers = {
+        "Authorization": f"Bearer {MySettings.CHAPA_SECRET_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers=headers)
+            data = resp.json() if resp.content else {}
+            if resp.status_code >= 400 or (
+                isinstance(data, dict)
+                and data.get("status")
+                and data.get("status") not in ("success", "successful")
+            ):
+                err_msg = (
+                    data.get("message")
+                    if isinstance(data, dict)
+                    else None
+                ) or f"Chapa banks request failed with status {resp.status_code}"
+                raise bad_request(f"Chapa error: {err_msg}")
+
+            if isinstance(data, dict):
+                banks = data.get("data")
+                if isinstance(banks, list):
+                    for bank in banks:
+                        if isinstance(bank, dict):
+                            code = bank.get("code") or bank.get("slug") or str(bank.get("id", ""))
+                            bank.setdefault("code", code)
+                            bank.setdefault("bank_code", code)
+                return data
+
+            if isinstance(data, list):
+                for bank in data:
+                    if isinstance(bank, dict):
+                        code = bank.get("code") or bank.get("slug") or str(bank.get("id", ""))
+                        bank.setdefault("code", code)
+                        bank.setdefault("bank_code", code)
+                return {
+                    "status": "success",
+                    "message": "Banks retrieved",
+                    "data": data,
+                }
+
+            return {
+                "status": "success",
+                "message": "Banks retrieved",
+                "data": [],
+            }
     except httpx.RequestError as exc:
         raise bad_request(f"Chapa network error: {str(exc)}") from exc

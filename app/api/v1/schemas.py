@@ -82,6 +82,12 @@ class PaymentWebhookOut(ApiModel):
     idempotent: bool | None = None
 
 
+class ChapaBanksOut(ApiModel):
+    message: str | None = "Banks retrieved"
+    status: str | None = "success"
+    data: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class PushOut(ApiModel):
     ok: bool = True
     fcm: dict[str, Any] | None = None

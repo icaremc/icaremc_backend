@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
 
-from app.api.v1.schemas import PaymentInitiateOut, PaymentWebhookOut
+from app.api.v1.schemas import ChapaBanksOut, PaymentInitiateOut, PaymentWebhookOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.payments.repository import SqlAlchemyPaymentRepository
@@ -33,3 +33,9 @@ async def chapa_webhook(
     raw_body = await request.body()
     body = await request.json()
     return await svc.handle_webhook(raw_body, body, sig)
+
+
+@router.get("/chapa/banks")
+@router.get("/banks")
+async def get_banks(svc: PaymentServiceDep) -> ChapaBanksOut:
+    return await svc.get_banks()
