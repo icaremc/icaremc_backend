@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request
 
@@ -39,3 +39,15 @@ async def chapa_webhook(
 @router.get("/banks")
 async def get_banks(svc: PaymentServiceDep) -> ChapaBanksOut:
     return await svc.get_banks()
+
+
+@router.post("/chapa/transfer-approval")
+@router.post("/transfer-approval")
+async def chapa_transfer_approval(
+    request: Request,
+    svc: PaymentServiceDep,
+) -> dict[str, Any]:
+    sig = request.headers.get("chapa-signature") or request.headers.get("x-chapa-signature")
+    raw_body = await request.body()
+    body = await request.json() if raw_body else {}
+    return await svc.handle_transfer_approval(raw_body, body, sig)

@@ -14,6 +14,7 @@ class PaymentRepository(Protocol):
     async def get_app_sub_by_tx(self, tx_ref: str) -> AppSubscription | None: ...
     async def get_care_sub_by_tx(self, tx_ref: str) -> CareSubscription | None: ...
     async def get_service(self, service_id: UUID) -> DoctorService: ...
+    async def find_payout_by_reference(self, reference: str) -> object | None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
     @property
@@ -47,6 +48,24 @@ class SqlAlchemyPaymentRepository:
 
     async def get_service(self, service_id: UUID) -> DoctorService:
         return (await self._db.execute(select(DoctorService).where(DoctorService.id == service_id))).scalar_one()
+
+    async def find_payout_by_reference(self, reference: str) -> object | None:
+        from app.persistence.sqlalchemy.models import DoctorPayoutRequest, PatientWalletWithdrawalRequest
+        doc = (
+            await self._db.execute(
+                select(DoctorPayoutRequest).where(DoctorPayoutRequest.chapa_transfer_reference == reference)
+            )
+        ).scalar_one_or_none()
+        if doc is not None:
+            return doc
+        pat = (
+            await self._db.execute(
+                select(PatientWalletWithdrawalRequest).where(
+                    PatientWalletWithdrawalRequest.chapa_transfer_reference == reference
+                )
+            )
+        ).scalar_one_or_none()
+        return pat
 
     def add(self, obj: object) -> None:
         self._db.add(obj)

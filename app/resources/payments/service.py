@@ -97,6 +97,30 @@ class PaymentService:
         # elif MySettings.CHAPA_SECRET_KEY or MySettings.ENVIRONMENT != EnvironmentOptions.DEVELOPMENT:
         #     raise unauthorized("Webhook secret required")
 
+    def _verify_transfer_approval_signature(self, raw_body: bytes, chapa_signature: str | None) -> None:
+        import hmac
+        import hashlib
+        secret = MySettings.CHAPA_TRANSFER_APPROVAL_SECRET or MySettings.CHAPA_WEBHOOK_SECRET
+        if secret:
+            if not chapa_signature:
+                raise unauthorized("Missing approval signature")
+            expected_hash = hmac.new(
+                secret.encode(),
+                raw_body,
+                hashlib.sha256
+            ).hexdigest()
+            if chapa_signature != expected_hash and chapa_signature != secret:
+                raise unauthorized("Bad approval signature")
+
+    async def handle_transfer_approval(
+        self, raw_body: bytes, body: Mapping[str, Any], chapa_signature: str | None
+    ) -> dict[str, Any]:
+        self._verify_transfer_approval_signature(raw_body, chapa_signature)
+        reference = body.get("reference")
+        if reference:
+            await self._repo.find_payout_by_reference(str(reference))
+        return {"status": "approved", "message": "Transfer approved"}
+
     async def handle_webhook(self, raw_body: bytes, body: Mapping[str, object], chapa_signature: str | None) -> PaymentWebhookOut:
         self._verify_webhook_signature(raw_body, chapa_signature)
         tx_ref = body.get("tx_ref") or body.get("data", {}).get("tx_ref")

@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     CHAPA_SECRET_KEY: str = ""
     CHAPA_PUBLIC_KEY: str = ""
     CHAPA_WEBHOOK_SECRET: str = ""
+    CHAPA_TRANSFER_APPROVAL_SECRET: str = ""
     CHAPA_BASE_URL: str = "https://api.chapa.co/v1"
 
     FCM_SERVER_KEY: str = ""

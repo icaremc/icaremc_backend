@@ -58,3 +58,53 @@ def test_get_chapa_banks_error_handling(client):
             res = client.get("/api/v1/payments/chapa/banks")
             assert res.status_code == 400
             assert "Chapa error" in res.json()["detail"]
+
+
+def test_chapa_transfer_approval_webhook_success(client):
+    import hmac
+    import hashlib
+    import json
+
+    secret = "test_approval_secret_123"
+    payload = {
+        "amount": "100.00",
+        "currency": "ETB",
+        "reference": "pat-payout-test-ref-12345",
+        "bank": "cbe",
+        "account_name": "Test User",
+        "account_number": "100012345678",
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+
+    with patch.object(MySettings, "CHAPA_TRANSFER_APPROVAL_SECRET", secret):
+        res = client.post(
+            "/api/v1/payments/chapa/transfer-approval",
+            content=raw_body,
+            headers={"Content-Type": "application/json", "chapa-signature": sig},
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["status"] == "approved"
+
+        # Also verify with direct secret header
+        res2 = client.post(
+            "/api/v1/payments/transfer-approval",
+            content=raw_body,
+            headers={"Content-Type": "application/json", "chapa-signature": secret},
+        )
+        assert res2.status_code == 200
+        assert res2.json()["status"] == "approved"
+
+
+def test_chapa_transfer_approval_webhook_bad_signature(client):
+    secret = "test_approval_secret_123"
+    payload = {"amount": "100.00", "reference": "pat-payout-fake"}
+
+    with patch.object(MySettings, "CHAPA_TRANSFER_APPROVAL_SECRET", secret):
+        res = client.post(
+            "/api/v1/payments/chapa/transfer-approval",
+            json=payload,
+            headers={"chapa-signature": "invalid-signature"},
+        )
+        assert res.status_code == 401
