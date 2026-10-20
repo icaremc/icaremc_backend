@@ -103,9 +103,6 @@ class PaymentService:
         import hashlib
         import hmac
         import json
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         secret = (MySettings.CHAPA_TRANSFER_APPROVAL_SECRET or MySettings.CHAPA_WEBHOOK_SECRET).strip()
         if not secret:
@@ -116,7 +113,6 @@ class PaymentService:
             return
 
         if not chapa_signature:
-            logger.warning("Chapa transfer approval received without signature header")
             raise unauthorized("Missing approval signature")
 
         sig = chapa_signature.strip()
@@ -127,12 +123,19 @@ class PaymentService:
         if sig == secret:
             return
 
-        # 2. HMAC over raw request bytes
+        # 2. HMAC(key=secret, msg=secret) — Chapa's actual signing scheme for transfer approvals:
+        #    they do NOT hash the body; instead they sign the secret string with itself.
+        expected_self = hmac.new(secret.encode(), secret.encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(sig, expected_self):
+            return
+
+        # 3. HMAC over raw request bytes
         expected_raw = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
         if hmac.compare_digest(sig, expected_raw):
             return
 
-        # 3. HMAC over compact JSON
+        # 4. HMAC over compact JSON
+        expected_compact = None
         try:
             compact_json = json.dumps(body, separators=(",", ":")).encode("utf-8")
             expected_compact = hmac.new(secret.encode(), compact_json, hashlib.sha256).hexdigest()
@@ -141,7 +144,8 @@ class PaymentService:
         except Exception:
             pass
 
-        # 4. HMAC over standard JSON
+        # 5. HMAC over standard JSON
+        expected_std = None
         try:
             standard_json = json.dumps(body).encode("utf-8")
             expected_std = hmac.new(secret.encode(), standard_json, hashlib.sha256).hexdigest()
@@ -149,12 +153,7 @@ class PaymentService:
                 return
         except Exception:
             pass
-
-        logger.warning(
-            "Chapa transfer approval signature mismatch. Received: %s, Expected: %s",
-            sig,
-            expected_raw,
-        )
+            
         raise unauthorized("Bad approval signature")
 
     async def handle_transfer_approval(
