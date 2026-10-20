@@ -162,7 +162,44 @@ class PaymentService:
         self._verify_transfer_approval_signature(raw_body, body, chapa_signature)
         reference = body.get("reference")
         if reference:
-            await self._repo.find_payout_by_reference(str(reference))
+            payout = await self._repo.find_payout_by_reference(str(reference))
+            if payout is not None:
+                payout.status = "completed"
+                payout.payment_date = datetime.now(UTC)
+                await self._repo.flush()
+
+                patient_id = getattr(payout, "patient_id", None)
+                if patient_id:
+                    await dispatch_notification(
+                        db=self._repo.session,
+                        user_id=patient_id,
+                        title="Withdrawal Completed",
+                        body=f"Your withdrawal request of {payout.amount} ETB has been completed.",
+                        type="patient_withdrawal",
+                        data={
+                            "type": "withdrawal",
+                            "screen": "patient_wallet",
+                            "route": "/wallet",
+                            "resource_id": str(payout.id),
+                        },
+                        is_urgent=True,
+                    )
+                doctor_id = getattr(payout, "doctor_id", None)
+                if doctor_id:
+                    await dispatch_notification(
+                        db=self._repo.session,
+                        user_id=doctor_id,
+                        title="Payout Completed",
+                        body=f"Your payout request of {payout.amount} ETB has been completed.",
+                        type="doctor_payout",
+                        data={
+                            "type": "payout",
+                            "screen": "doctor_wallet",
+                            "route": "/doctor/wallet",
+                            "resource_id": str(payout.id),
+                        },
+                        is_urgent=True,
+                    )
         return {"status": "approved", "message": "Transfer approved"}
 
     async def handle_webhook(self, raw_body: bytes, body: Mapping[str, object], chapa_signature: str | None) -> PaymentWebhookOut:

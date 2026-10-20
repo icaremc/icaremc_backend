@@ -948,6 +948,7 @@ class AdminService:
                     note=f"Refunded rejected withdrawal: {body.admin_note or ''}",
                 )
             )
+            req.status = "rejected"
         elif body.status in ("approved", "completed"):
             if not req.chapa_transfer_reference:
                 method = None
@@ -969,26 +970,44 @@ class AdminService:
                     reference=reference,
                 )
                 req.chapa_transfer_reference = reference
-                req.payment_date = datetime.now(UTC)
+                req.status = "processing"
+            else:
+                req.status = body.status
+        else:
+            req.status = body.status
 
-        req.status = body.status
         req.admin_note = body.admin_note
         if admin is not None:
             await self._log(
                 admin,
                 "patient_withdrawal.action",
-                f"Patient withdrawal request {body.status}",
+                f"Patient withdrawal request {req.status}",
                 resource_type="patient_withdrawal",
                 resource_id=str(request_id),
                 request_id=str(request_id),
-                status=body.status,
+                status=req.status,
                 patient_id=str(req.patient_id),
                 amount=float(req.amount),
             )
         await self._repo.session.flush()
 
-        if body.status in ("approved", "completed"):
-            action_label = "approved" if body.status == "approved" else "completed"
+        if req.status == "processing":
+            await dispatch_notification(
+                db=self._repo.session,
+                user_id=req.patient_id,
+                title="Withdrawal Processing",
+                body=f"Your withdrawal request of {req.amount} ETB is being processed.",
+                type="patient_withdrawal",
+                data={
+                    "type": "withdrawal",
+                    "screen": "patient_wallet",
+                    "route": "/wallet",
+                    "resource_id": str(req.id),
+                },
+                is_urgent=True,
+            )
+        elif req.status in ("approved", "completed"):
+            action_label = "approved" if req.status == "approved" else "completed"
             await dispatch_notification(
                 db=self._repo.session,
                 user_id=req.patient_id,
@@ -1003,7 +1022,7 @@ class AdminService:
                 },
                 is_urgent=True,
             )
-        elif body.status == "rejected":
+        elif req.status == "rejected":
             note_suffix = f" Reason: {body.admin_note}" if body.admin_note else ""
             await dispatch_notification(
                 db=self._repo.session,
