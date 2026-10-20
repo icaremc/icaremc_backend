@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, or_, select
@@ -17,6 +18,7 @@ from app.persistence.sqlalchemy.models import (
     AppSetting,
     AppSubscription,
     Child,
+    ChildPayment,
     ChildFollowupVisitTemplate,
     ChildGrowthMeasurement,
     ChildGrowthPeriod,
@@ -640,6 +642,7 @@ class AdminService:
         offset: int = 0,
         search: str | None = None,
         gender: str | None = None,
+        payment_status: str | None = None,
         user_id: UUID | None = None,
         dob_from: date | None = None,
         dob_to: date | None = None,
@@ -661,6 +664,8 @@ class AdminService:
             )
         if gender and gender.strip():
             conditions.append(Child.gender == gender.strip())
+        if payment_status and payment_status.strip():
+            conditions.append(Child.payment_status == payment_status.strip())
         if user_id:
             conditions.append(Child.user_id == user_id)
         if dob_from is not None:
@@ -684,6 +689,86 @@ class AdminService:
             children.append(child_dict)
             
         return {"children": children}
+
+    async def list_child_payments(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        status: str | None = None,
+        child_id: UUID | None = None,
+        user_id: UUID | None = None,
+    ) -> dict[str, object]:
+        cap = max(1, min(limit, 500))
+        stmt = (
+            select(ChildPayment, Child, Profile)
+            .join(Child, ChildPayment.child_id == Child.id)
+            .join(Profile, ChildPayment.user_id == Profile.id)
+        )
+        conditions = []
+        if status and status.strip():
+            conditions.append(ChildPayment.status == status.strip())
+        if child_id:
+            conditions.append(ChildPayment.child_id == child_id)
+        if user_id:
+            conditions.append(ChildPayment.user_id == user_id)
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        rows = (
+            await self._repo.session.execute(
+                stmt.order_by(ChildPayment.created_at.desc()).offset(offset).limit(cap)
+            )
+        ).all()
+
+        payments = []
+        for payment, child, profile in rows:
+            p_dict = require_row(payment).model_dump()
+            p_dict["child_name"] = child.name
+            p_dict["patient_name"] = profile.full_name
+            p_dict["patient_phone"] = profile.phone
+            payments.append(p_dict)
+        return {"payments": payments}
+
+    async def manual_activate_child(
+        self,
+        child_id: UUID,
+        amount: Decimal = Decimal("500.00"),
+        payment_method: str = "admin_manual",
+        actor: AuthUser | None = None,
+    ) -> RowOut:
+        child = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+        if child is None:
+            raise not_found("Child not found")
+        now = datetime.now(UTC)
+        tx_ref = f"icare-admin-child-{uuid4().hex[:12]}"
+        child.payment_status = "paid"
+        child.amount_paid = amount
+        child.payment_method = payment_method
+        child.payment_tx_ref = tx_ref
+        child.paid_at = now
+
+        self._repo.session.add(
+            ChildPayment(
+                user_id=child.user_id,
+                child_id=child.id,
+                amount=amount,
+                status="success",
+                tx_ref=tx_ref,
+                payment_method=payment_method,
+                completed_at=now,
+            )
+        )
+        await self._repo.session.flush()
+
+        if actor:
+            await self._log(
+                actor,
+                "child.activate",
+                f"Child {child.name} manually activated",
+                resource_type="child",
+                resource_id=str(child.id),
+            )
+        return require_row(child)
 
     async def get_child(self, child_id: UUID) -> RowOut:
         row = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()

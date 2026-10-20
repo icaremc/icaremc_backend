@@ -392,3 +392,8 @@ class PayoutReviewOut(BaseModel):
     payout_history: list[PayoutHistoryItemOut]
     recent_earnings: list[PayoutRecentEarningItemOut]
 
+
+class ActivateChildIn(BaseModel):
+    amount: Decimal = Decimal("500.00")
+    payment_method: str = "admin_manual"
+

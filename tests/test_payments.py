@@ -122,3 +122,136 @@ def test_chapa_webhook_care_subscription(client, patient_auth, doctor_auth, admi
     # Check doctor notification
     d_notifs = client.get("/api/v1/doctor/notifications", headers=doctor_h).json()
     assert any(n["type"] == "doctor_care_subscription_new" for n in d_notifs)
+
+
+def test_child_payment_flow(client, patient_auth):
+    patient_h = auth_header(patient_auth["token"])
+
+    # 1. Create a child -> starts as unpaid
+    child_res = client.post(
+        "/api/v1/children",
+        headers=patient_h,
+        json={
+            "name": "Little Abebe",
+            "gender": "male",
+            "birth_date": str(date.today() - timedelta(days=30)),
+        },
+    )
+    assert child_res.status_code == 200
+    child = child_res.json()
+    assert child["payment_status"] == "unpaid"
+    child_id = child["id"]
+
+    # 2. Check child payment status endpoint
+    status_res = client.get(
+        f"/api/v1/payments/children/{child_id}/status",
+        headers=patient_h,
+    )
+    assert status_res.status_code == 200
+    assert status_res.json()["payment_status"] == "unpaid"
+
+    # 3. Initiate payment via Chapa (dev mode)
+    init_res = client.post(
+        "/api/v1/payments/chapa/initiate",
+        headers=patient_h,
+        json={
+            "kind": "child_registration",
+            "amount": "500.00",
+            "child_id": child_id,
+        },
+    )
+    assert init_res.status_code == 200
+    init_body = init_res.json()
+    assert init_body["ok"] is True
+    assert init_body["dev"] is True
+    tx_ref = init_body["tx_ref"]
+    assert "child_registration" in tx_ref
+
+    # 4. Trigger Chapa Webhook
+    webhook_res = client.post(
+        "/api/v1/payments/chapa/webhook",
+        json={
+            "tx_ref": tx_ref,
+            "status": "success",
+            "amount": "500.00",
+            "reference": "CHAPA-TEST-12345",
+            "meta": {
+                "kind": "child_registration",
+                "user_id": patient_auth["user_id"],
+                "child_id": child_id,
+            },
+        },
+    )
+    assert webhook_res.status_code == 200
+    assert webhook_res.json().get("type") == "child_registration"
+
+    # 5. Idempotent webhook check
+    webhook_dup = client.post(
+        "/api/v1/payments/chapa/webhook",
+        json={
+            "tx_ref": tx_ref,
+            "status": "success",
+            "amount": "500.00",
+        },
+    )
+    assert webhook_dup.status_code == 200
+    assert webhook_dup.json().get("idempotent") is True
+
+    # 6. Verify child is now paid
+    child_after = client.get(f"/api/v1/children/{child_id}", headers=patient_h).json()
+    assert child_after["payment_status"] == "paid"
+    assert float(child_after["amount_paid"]) == 500.0
+    assert child_after["payment_method"] == "chapa"
+    assert child_after["payment_tx_ref"] == tx_ref
+
+    # 7. Check verify transaction endpoint
+    verify_res = client.get(f"/api/v1/payments/verify/{tx_ref}", headers=patient_h)
+    assert verify_res.status_code == 200
+    assert verify_res.json()["status"] == "success"
+
+    # 8. Check patient received confirmation notification
+    p_notifs = client.get("/api/v1/notifications", headers=patient_h).json()
+    assert any(n["type"] == "child_payment_confirmed" for n in p_notifs)
+
+
+def test_admin_child_payment_management(client, patient_auth, admin_auth):
+    patient_h = auth_header(patient_auth["token"])
+    admin_h = auth_header(admin_auth["token"])
+
+    # 1. Create a child
+    child = client.post(
+        "/api/v1/children",
+        headers=patient_h,
+        json={
+            "name": "Sara Admin Test",
+            "gender": "female",
+            "birth_date": str(date.today() - timedelta(days=60)),
+        },
+    ).json()
+    child_id = child["id"]
+    assert child["payment_status"] == "unpaid"
+
+    # 2. Admin manually activates child
+    act_res = client.post(
+        f"/api/v1/admin/children/{child_id}/activate",
+        headers=admin_h,
+        json={"amount": "450.00", "payment_method": "cash_receipt"},
+    )
+    assert act_res.status_code == 200
+    activated = act_res.json()
+    assert activated["payment_status"] == "paid"
+    assert float(activated["amount_paid"]) == 450.0
+    assert activated["payment_method"] == "cash_receipt"
+
+    # 3. Admin queries child payments list
+    payments_res = client.get(
+        "/api/v1/admin/child-payments",
+        headers=admin_h,
+        params={"child_id": child_id},
+    )
+    assert payments_res.status_code == 200
+    payments = payments_res.json()["payments"]
+    assert len(payments) >= 1
+    assert payments[0]["child_id"] == child_id
+    assert payments[0]["status"] == "success"
+    assert float(payments[0]["amount"]) == 450.0

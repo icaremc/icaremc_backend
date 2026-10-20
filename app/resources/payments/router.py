@@ -1,4 +1,5 @@
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Request
 
@@ -6,7 +7,7 @@ from app.api.v1.schemas import ChapaBanksOut, PaymentInitiateOut, PaymentWebhook
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.payments.repository import SqlAlchemyPaymentRepository
-from app.resources.payments.schemas import InitiateIn
+from app.resources.payments.schemas import ChildPaymentStatusOut, InitiateIn
 from app.resources.payments.service import PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -65,3 +66,15 @@ async def chapa_transfer_approval(
     except Exception:
         body = {}
     return await svc.handle_transfer_approval(raw_body, body, sig)
+
+
+@router.get("/verify/{tx_ref}")
+async def verify_payment(tx_ref: str, user: RequirePatient, svc: PaymentServiceDep) -> dict[str, Any]:
+    return await svc.verify_transaction(tx_ref, user.id)
+
+
+@router.get("/children/{child_id}/status")
+async def get_child_payment_status(
+    child_id: UUID, user: RequirePatient, svc: PaymentServiceDep
+) -> ChildPaymentStatusOut:
+    return await svc.get_child_payment_status(child_id, user.id)

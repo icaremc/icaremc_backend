@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -231,6 +232,32 @@ class PatientSubscriptionPayment(Base):
     payment_ref: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     period_label: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChildPayment(Base):
+    __tablename__ = "child_payments"
+    __table_args__ = (
+        Index("ix_child_payments_user_id", "user_id"),
+        Index("ix_child_payments_child_id", "child_id"),
+        Index("ix_child_payments_tx_ref", "tx_ref", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    child_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("children.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), default="ETB", server_default=text("'ETB'"))
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default=text("'pending'"))
+    tx_ref: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    chapa_reference: Mapped[str | None] = mapped_column(Text)
+    payment_method: Mapped[str] = mapped_column(String(32), default="chapa", server_default=text("'chapa'"))
+    raw_payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DoctorReferralCommission(Base):

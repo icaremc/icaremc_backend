@@ -9,6 +9,7 @@ from app.core.security.deps import RequireAdmin
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
+    ActivateChildIn,
     ActivityLogsOut,
     AdminCreateIn,
     AdminPatchIn,
@@ -213,6 +214,7 @@ async def list_children(
     svc: AdminDep,
     search: Annotated[str | None, Query(description="Search child name, parent name, or phone")] = None,
     gender: Annotated[str | None, Query(description="Filter by gender")] = None,
+    payment_status: Annotated[str | None, Query(description="Filter by payment status")] = None,
     user_id: Annotated[UUID | None, Query(description="Filter by parent user ID")] = None,
     dob_from: Annotated[date | None, Query(description="Filter by birth date >= dob_from")] = None,
     dob_to: Annotated[date | None, Query(description="Filter by birth date <= dob_to")] = None,
@@ -224,9 +226,44 @@ async def list_children(
         offset=offset,
         search=search,
         gender=gender,
+        payment_status=payment_status,
         user_id=user_id,
         dob_from=dob_from,
         dob_to=dob_to,
+    )
+
+
+@children_router.get("/child-payments")
+async def list_child_payments(
+    user: RequireAdmin,
+    svc: AdminDep,
+    status: Annotated[str | None, Query(description="Filter by status")] = None,
+    child_id: Annotated[UUID | None, Query(description="Filter by child ID")] = None,
+    user_id: Annotated[UUID | None, Query(description="Filter by parent ID")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    return await svc.list_child_payments(
+        limit=limit,
+        offset=offset,
+        status=status,
+        child_id=child_id,
+        user_id=user_id,
+    )
+
+
+@children_router.post("/children/{child_id}/activate")
+async def manual_activate_child(
+    child_id: UUID,
+    body: ActivateChildIn,
+    user: RequireAdmin,
+    svc: AdminDep,
+) -> RowOut:
+    return await svc.manual_activate_child(
+        child_id=child_id,
+        amount=body.amount,
+        payment_method=body.payment_method,
+        actor=user,
     )
 
 

@@ -5,7 +5,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.persistence.sqlalchemy.models import Appointment, AppSubscription, CareSubscription, DoctorService
+from app.persistence.sqlalchemy.models import (
+    Appointment,
+    AppSubscription,
+    CareSubscription,
+    Child,
+    ChildPayment,
+    DoctorService,
+)
 
 
 class PaymentRepository(Protocol):
@@ -14,6 +21,10 @@ class PaymentRepository(Protocol):
     async def get_app_sub_by_tx(self, tx_ref: str) -> AppSubscription | None: ...
     async def get_care_sub_by_tx(self, tx_ref: str) -> CareSubscription | None: ...
     async def get_service(self, service_id: UUID) -> DoctorService: ...
+    async def get_child(self, child_id: UUID, user_id: UUID) -> Child | None: ...
+    async def get_child_by_id(self, child_id: UUID) -> Child | None: ...
+    async def get_child_payment_by_tx(self, tx_ref: str) -> ChildPayment | None: ...
+    async def get_child_by_tx(self, tx_ref: str) -> Child | None: ...
     async def find_payout_by_reference(self, reference: str) -> object | None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
@@ -48,6 +59,20 @@ class SqlAlchemyPaymentRepository:
 
     async def get_service(self, service_id: UUID) -> DoctorService:
         return (await self._db.execute(select(DoctorService).where(DoctorService.id == service_id))).scalar_one()
+
+    async def get_child(self, child_id: UUID, user_id: UUID) -> Child | None:
+        return (
+            await self._db.execute(select(Child).where(Child.id == child_id, Child.user_id == user_id))
+        ).scalar_one_or_none()
+
+    async def get_child_by_id(self, child_id: UUID) -> Child | None:
+        return (await self._db.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
+
+    async def get_child_payment_by_tx(self, tx_ref: str) -> ChildPayment | None:
+        return (await self._db.execute(select(ChildPayment).where(ChildPayment.tx_ref == tx_ref))).scalar_one_or_none()
+
+    async def get_child_by_tx(self, tx_ref: str) -> Child | None:
+        return (await self._db.execute(select(Child).where(Child.payment_tx_ref == tx_ref))).scalar_one_or_none()
 
     async def find_payout_by_reference(self, reference: str) -> object | None:
         from app.persistence.sqlalchemy.models import DoctorPayoutRequest, PatientWalletWithdrawalRequest

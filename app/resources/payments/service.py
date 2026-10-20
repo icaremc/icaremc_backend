@@ -7,10 +7,10 @@ import httpx
 
 from app.api.v1.schemas import PaymentInitiateOut, PaymentWebhookOut
 from app.config import EnvironmentOptions, MySettings
-from app.persistence.sqlalchemy.models import AppSubscription, CareSubscription
+from app.persistence.sqlalchemy.models import AppSubscription, CareSubscription, ChildPayment
 from app.resources.errors import not_found, unauthorized, bad_request
 from app.resources.payments.repository import PaymentRepository
-from app.resources.payments.schemas import InitiateIn
+from app.resources.payments.schemas import ChildPaymentStatusOut, InitiateIn
 from app.resources.push.service import dispatch_notification
 
 class PaymentService:
@@ -26,12 +26,33 @@ class PaymentService:
             appt.chapa_tx_ref = tx_ref
             await self._repo.flush()
 
+        if (body.kind in ("child_registration", "child")) and body.child_id:
+            child = await self._repo.get_child(body.child_id, user_id)
+            if child is None:
+                raise not_found("Child not found")
+            if child.payment_status == "paid":
+                raise bad_request("Child profile is already activated")
+            child.payment_tx_ref = tx_ref
+            self._repo.add(
+                ChildPayment(
+                    user_id=user_id,
+                    child_id=child.id,
+                    amount=body.amount,
+                    currency=body.currency,
+                    status="pending",
+                    tx_ref=tx_ref,
+                    payment_method="chapa",
+                )
+            )
+            await self._repo.flush()
+
         meta = {
             "kind": body.kind,
             "user_id": str(user_id),
             "appointment_id": str(body.appointment_id) if body.appointment_id else None,
             "service_id": str(body.service_id) if body.service_id else None,
             "doctor_id": str(body.doctor_id) if body.doctor_id else None,
+            "child_id": str(body.child_id) if body.child_id else None,
         }
 
         if not MySettings.CHAPA_SECRET_KEY:
@@ -262,6 +283,9 @@ class PaymentService:
             return PaymentWebhookOut(type="app_subscription", idempotent=True)
         if await self._repo.get_care_sub_by_tx(tx_ref):
             return PaymentWebhookOut(type="care_subscription", idempotent=True)
+        child_payment = await self._repo.get_child_payment_by_tx(tx_ref)
+        if child_payment and child_payment.status == "success":
+            return PaymentWebhookOut(type="child_registration", idempotent=True)
 
         meta = body.get("meta") or body.get("data", {}).get("meta") or {}
         kind = meta.get("kind")
@@ -354,7 +378,134 @@ class PaymentService:
 
             return PaymentWebhookOut(type="care_subscription")
 
+        if (kind in ("child_registration", "child")) or child_payment:
+            now = datetime.now(UTC)
+            amount = Decimal(
+                str(
+                    body.get("amount")
+                    or body.get("data", {}).get("amount")
+                    or (child_payment.amount if child_payment else 0)
+                )
+            )
+            child_id = (child_payment.child_id if child_payment else None) or (
+                UUID(meta["child_id"]) if meta.get("child_id") else None
+            )
+            target_user_id = (child_payment.user_id if child_payment else None) or (
+                UUID(user_id) if user_id else None
+            )
+
+            child = await self._repo.get_child_by_id(child_id) if child_id else None
+            if child:
+                child.payment_status = "paid"
+                child.amount_paid = amount
+                child.payment_method = "chapa"
+                child.payment_tx_ref = tx_ref
+                child.paid_at = now
+
+            chapa_ref = str(body.get("reference") or body.get("data", {}).get("reference") or "")
+            if child_payment:
+                child_payment.status = "success"
+                child_payment.completed_at = now
+                if chapa_ref:
+                    child_payment.chapa_reference = chapa_ref
+                child_payment.raw_payload = dict(body)
+            elif target_user_id and child_id:
+                self._repo.add(
+                    ChildPayment(
+                        user_id=target_user_id,
+                        child_id=child_id,
+                        amount=amount,
+                        status="success",
+                        tx_ref=tx_ref,
+                        chapa_reference=chapa_ref,
+                        payment_method="chapa",
+                        raw_payload=dict(body),
+                        completed_at=now,
+                    )
+                )
+            await self._repo.flush()
+
+            # Push notification to Patient
+            if target_user_id:
+                child_name = getattr(child, "name", "your child") if child else "your child"
+                await dispatch_notification(
+                    db=self._repo.session,
+                    user_id=target_user_id,
+                    title="Child Profile Activated",
+                    body=f"Payment received! {child_name}'s profile is now active.",
+                    type="child_payment_confirmed",
+                    data={
+                        "type": "child",
+                        "screen": "child_detail",
+                        "route": f"/children/{child_id}" if child_id else "/children",
+                        "resource_id": str(child_id) if child_id else None,
+                        "child_id": str(child_id) if child_id else None,
+                    },
+                    is_urgent=True,
+                )
+
+            return PaymentWebhookOut(type="child_registration")
+
         return PaymentWebhookOut(unmatched=True)
+
+    async def get_child_payment_status(self, child_id: UUID, user_id: UUID) -> ChildPaymentStatusOut:
+        child = await self._repo.get_child(child_id, user_id)
+        if child is None:
+            raise not_found("Child not found")
+        return ChildPaymentStatusOut(
+            child_id=child.id,
+            payment_status=child.payment_status or "unpaid",
+            amount_paid=child.amount_paid,
+            currency=child.currency or "ETB",
+            payment_method=child.payment_method,
+            paid_at=child.paid_at.isoformat() if child.paid_at else None,
+            tx_ref=child.payment_tx_ref,
+        )
+
+    async def verify_transaction(self, tx_ref: str, user_id: UUID) -> dict[str, Any]:
+        child_payment = await self._repo.get_child_payment_by_tx(tx_ref)
+        if child_payment:
+            if child_payment.user_id != user_id:
+                raise not_found()
+            if child_payment.status != "success" and MySettings.CHAPA_SECRET_KEY:
+                try:
+                    async with httpx.AsyncClient(timeout=15) as client:
+                        resp = await client.get(
+                            f"{MySettings.CHAPA_BASE_URL}/transaction/verify/{tx_ref}",
+                            headers={"Authorization": f"Bearer {MySettings.CHAPA_SECRET_KEY}"},
+                        )
+                        if resp.status_code == 200:
+                            vdata = resp.json()
+                            status_val = vdata.get("status") or (vdata.get("data") or {}).get("status")
+                            if status_val in ("success", "successful"):
+                                child = await self._repo.get_child_by_id(child_payment.child_id)
+                                now = datetime.now(UTC)
+                                child_payment.status = "success"
+                                child_payment.completed_at = now
+                                child_payment.raw_payload = vdata
+                                if child:
+                                    child.payment_status = "paid"
+                                    child.amount_paid = child_payment.amount
+                                    child.payment_method = "chapa"
+                                    child.payment_tx_ref = tx_ref
+                                    child.paid_at = now
+                                await self._repo.flush()
+                except Exception:
+                    pass
+            return {
+                "ok": True,
+                "kind": "child_registration",
+                "tx_ref": tx_ref,
+                "status": child_payment.status,
+                "child_id": str(child_payment.child_id),
+            }
+
+        appt = await self._repo.get_appointment_by_tx(tx_ref)
+        if appt and appt.patient_id == user_id:
+            return {"ok": True, "kind": "appointment", "tx_ref": tx_ref, "status": appt.payment_status}
+
+        return {"ok": True, "tx_ref": tx_ref, "status": "unknown"}
+
 
 
 async def execute_chapa_transfer(
