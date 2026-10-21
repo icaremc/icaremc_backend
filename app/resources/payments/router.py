@@ -7,7 +7,11 @@ from app.api.v1.schemas import ChapaBanksOut, PaymentInitiateOut, PaymentWebhook
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.payments.repository import SqlAlchemyPaymentRepository
-from app.resources.payments.schemas import ChildPaymentStatusOut, InitiateIn
+from app.resources.payments.schemas import (
+    ChildPaymentStatusOut,
+    InitiateIn,
+    PregnancyPaymentStatusOut,
+)
 from app.resources.payments.service import PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -78,3 +82,10 @@ async def get_child_payment_status(
     child_id: UUID, user: RequirePatient, svc: PaymentServiceDep
 ) -> ChildPaymentStatusOut:
     return await svc.get_child_payment_status(child_id, user.id)
+
+
+@router.get("/pregnancies/{pregnancy_id}/status")
+async def get_pregnancy_payment_status(
+    pregnancy_id: UUID, user: RequirePatient, svc: PaymentServiceDep
+) -> PregnancyPaymentStatusOut:
+    return await svc.get_pregnancy_payment_status(pregnancy_id, user.id)

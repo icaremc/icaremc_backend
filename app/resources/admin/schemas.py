@@ -397,3 +397,7 @@ class ActivateChildIn(BaseModel):
     amount: Decimal = Decimal("500.00")
     payment_method: str = "admin_manual"
 
+
+ActivatePregnancyIn = ActivateChildIn
+ActivateCareProfileIn = ActivateChildIn
+

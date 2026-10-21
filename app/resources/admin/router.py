@@ -10,6 +10,7 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.admin.repository import SqlAlchemyAdminRepository
 from app.resources.admin.schemas import (
     ActivateChildIn,
+    ActivatePregnancyIn,
     ActivityLogsOut,
     AdminCreateIn,
     AdminPatchIn,
@@ -234,11 +235,14 @@ async def list_children(
 
 
 @children_router.get("/child-payments")
+@finance_router.get("/care-profile-payments")
 async def list_child_payments(
     user: RequireAdmin,
     svc: AdminDep,
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     child_id: Annotated[UUID | None, Query(description="Filter by child ID")] = None,
+    pregnancy_id: Annotated[UUID | None, Query(description="Filter by pregnancy ID")] = None,
+    payment_type: Annotated[str | None, Query(description="Filter by payment type ('child' or 'pregnancy')")] = None,
     user_id: Annotated[UUID | None, Query(description="Filter by parent ID")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -248,6 +252,8 @@ async def list_child_payments(
         offset=offset,
         status=status,
         child_id=child_id,
+        pregnancy_id=pregnancy_id,
+        payment_type=payment_type,
         user_id=user_id,
     )
 
@@ -261,6 +267,22 @@ async def manual_activate_child(
 ) -> RowOut:
     return await svc.manual_activate_child(
         child_id=child_id,
+        amount=body.amount,
+        payment_method=body.payment_method,
+        actor=user,
+    )
+
+
+@children_router.post("/pregnancies/{pregnancy_id}/activate")
+@finance_router.post("/pregnancies/{pregnancy_id}/activate")
+async def manual_activate_pregnancy(
+    pregnancy_id: UUID,
+    body: ActivatePregnancyIn,
+    user: RequireAdmin,
+    svc: AdminDep,
+) -> RowOut:
+    return await svc.manual_activate_pregnancy(
+        pregnancy_id=pregnancy_id,
         amount=body.amount,
         payment_method=body.payment_method,
         actor=user,

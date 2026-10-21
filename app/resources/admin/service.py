@@ -17,6 +17,7 @@ from app.persistence.sqlalchemy.models import (
     Appointment,
     AppSetting,
     AppSubscription,
+    CareProfilePayment,
     Child,
     ChildPayment,
     ChildFollowupVisitTemplate,
@@ -696,36 +697,47 @@ class AdminService:
         offset: int = 0,
         status: str | None = None,
         child_id: UUID | None = None,
+        pregnancy_id: UUID | None = None,
+        payment_type: str | None = None,
         user_id: UUID | None = None,
     ) -> dict[str, object]:
         cap = max(1, min(limit, 500))
         stmt = (
-            select(ChildPayment, Child, Profile)
-            .join(Child, ChildPayment.child_id == Child.id)
-            .join(Profile, ChildPayment.user_id == Profile.id)
+            select(CareProfilePayment, Profile, Child, Pregnancy)
+            .join(Profile, CareProfilePayment.user_id == Profile.id)
+            .outerjoin(Child, CareProfilePayment.child_id == Child.id)
+            .outerjoin(Pregnancy, CareProfilePayment.pregnancy_id == Pregnancy.id)
         )
         conditions = []
         if status and status.strip():
-            conditions.append(ChildPayment.status == status.strip())
+            conditions.append(CareProfilePayment.status == status.strip())
         if child_id:
-            conditions.append(ChildPayment.child_id == child_id)
+            conditions.append(CareProfilePayment.child_id == child_id)
+        if pregnancy_id:
+            conditions.append(CareProfilePayment.pregnancy_id == pregnancy_id)
+        if payment_type and payment_type.strip():
+            conditions.append(CareProfilePayment.payment_type == payment_type.strip())
         if user_id:
-            conditions.append(ChildPayment.user_id == user_id)
+            conditions.append(CareProfilePayment.user_id == user_id)
         if conditions:
             stmt = stmt.where(and_(*conditions))
 
         rows = (
             await self._repo.session.execute(
-                stmt.order_by(ChildPayment.created_at.desc()).offset(offset).limit(cap)
+                stmt.order_by(CareProfilePayment.created_at.desc()).offset(offset).limit(cap)
             )
         ).all()
 
         payments = []
-        for payment, child, profile in rows:
+        for payment, profile, child, pregnancy in rows:
             p_dict = require_row(payment).model_dump()
-            p_dict["child_name"] = child.name
             p_dict["patient_name"] = profile.full_name
             p_dict["patient_phone"] = profile.phone
+            if child:
+                p_dict["child_name"] = child.name
+            if pregnancy:
+                p_dict["pregnancy_number"] = pregnancy.pregnancy_number
+                p_dict["edd"] = pregnancy.edd.isoformat() if pregnancy.edd else None
             payments.append(p_dict)
         return {"payments": payments}
 
@@ -748,8 +760,9 @@ class AdminService:
         child.paid_at = now
 
         self._repo.session.add(
-            ChildPayment(
+            CareProfilePayment(
                 user_id=child.user_id,
+                payment_type="child",
                 child_id=child.id,
                 amount=amount,
                 status="success",
@@ -769,6 +782,50 @@ class AdminService:
                 resource_id=str(child.id),
             )
         return require_row(child)
+
+    async def manual_activate_pregnancy(
+        self,
+        pregnancy_id: UUID,
+        amount: Decimal = Decimal("500.00"),
+        payment_method: str = "admin_manual",
+        actor: AuthUser | None = None,
+    ) -> RowOut:
+        pregnancy = (
+            await self._repo.session.execute(select(Pregnancy).where(Pregnancy.id == pregnancy_id))
+        ).scalar_one_or_none()
+        if pregnancy is None:
+            raise not_found("Pregnancy not found")
+        now = datetime.now(UTC)
+        tx_ref = f"icare-admin-pregnancy-{uuid4().hex[:12]}"
+        pregnancy.payment_status = "paid"
+        pregnancy.amount_paid = amount
+        pregnancy.payment_method = payment_method
+        pregnancy.payment_tx_ref = tx_ref
+        pregnancy.paid_at = now
+
+        self._repo.session.add(
+            CareProfilePayment(
+                user_id=pregnancy.user_id,
+                payment_type="pregnancy",
+                pregnancy_id=pregnancy.id,
+                amount=amount,
+                status="success",
+                tx_ref=tx_ref,
+                payment_method=payment_method,
+                completed_at=now,
+            )
+        )
+        await self._repo.session.flush()
+
+        if actor:
+            await self._log(
+                actor,
+                "pregnancy.activate",
+                f"Pregnancy {pregnancy.id} manually activated",
+                resource_type="pregnancy",
+                resource_id=str(pregnancy.id),
+            )
+        return require_row(pregnancy)
 
     async def get_child(self, child_id: UUID) -> RowOut:
         row = (await self._repo.session.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()

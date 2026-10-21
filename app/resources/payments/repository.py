@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.persistence.sqlalchemy.models import (
     Appointment,
     AppSubscription,
+    CareProfilePayment,
     CareSubscription,
     Child,
     ChildPayment,
     DoctorService,
+    Pregnancy,
 )
 
 
@@ -23,7 +25,11 @@ class PaymentRepository(Protocol):
     async def get_service(self, service_id: UUID) -> DoctorService: ...
     async def get_child(self, child_id: UUID, user_id: UUID) -> Child | None: ...
     async def get_child_by_id(self, child_id: UUID) -> Child | None: ...
-    async def get_child_payment_by_tx(self, tx_ref: str) -> ChildPayment | None: ...
+    async def get_pregnancy(self, pregnancy_id: UUID, user_id: UUID) -> Pregnancy | None: ...
+    async def get_pregnancy_by_id(self, pregnancy_id: UUID) -> Pregnancy | None: ...
+    async def get_pregnancy_by_tx(self, tx_ref: str) -> Pregnancy | None: ...
+    async def get_care_payment_by_tx(self, tx_ref: str) -> CareProfilePayment | None: ...
+    async def get_child_payment_by_tx(self, tx_ref: str) -> CareProfilePayment | None: ...
     async def get_child_by_tx(self, tx_ref: str) -> Child | None: ...
     async def find_payout_by_reference(self, reference: str) -> object | None: ...
     def add(self, obj: object) -> None: ...
@@ -68,8 +74,22 @@ class SqlAlchemyPaymentRepository:
     async def get_child_by_id(self, child_id: UUID) -> Child | None:
         return (await self._db.execute(select(Child).where(Child.id == child_id))).scalar_one_or_none()
 
-    async def get_child_payment_by_tx(self, tx_ref: str) -> ChildPayment | None:
-        return (await self._db.execute(select(ChildPayment).where(ChildPayment.tx_ref == tx_ref))).scalar_one_or_none()
+    async def get_child_payment_by_tx(self, tx_ref: str) -> CareProfilePayment | None:
+        return await self.get_care_payment_by_tx(tx_ref)
+
+    async def get_care_payment_by_tx(self, tx_ref: str) -> CareProfilePayment | None:
+        return (await self._db.execute(select(CareProfilePayment).where(CareProfilePayment.tx_ref == tx_ref))).scalar_one_or_none()
+
+    async def get_pregnancy(self, pregnancy_id: UUID, user_id: UUID) -> Pregnancy | None:
+        return (
+            await self._db.execute(select(Pregnancy).where(Pregnancy.id == pregnancy_id, Pregnancy.user_id == user_id))
+        ).scalar_one_or_none()
+
+    async def get_pregnancy_by_id(self, pregnancy_id: UUID) -> Pregnancy | None:
+        return (await self._db.execute(select(Pregnancy).where(Pregnancy.id == pregnancy_id))).scalar_one_or_none()
+
+    async def get_pregnancy_by_tx(self, tx_ref: str) -> Pregnancy | None:
+        return (await self._db.execute(select(Pregnancy).where(Pregnancy.payment_tx_ref == tx_ref))).scalar_one_or_none()
 
     async def get_child_by_tx(self, tx_ref: str) -> Child | None:
         return (await self._db.execute(select(Child).where(Child.payment_tx_ref == tx_ref))).scalar_one_or_none()

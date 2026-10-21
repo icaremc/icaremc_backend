@@ -234,20 +234,28 @@ class PatientSubscriptionPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ChildPayment(Base):
-    __tablename__ = "child_payments"
+class CareProfilePayment(Base):
+    __tablename__ = "care_profile_payments"
     __table_args__ = (
-        Index("ix_child_payments_user_id", "user_id"),
-        Index("ix_child_payments_child_id", "child_id"),
-        Index("ix_child_payments_tx_ref", "tx_ref", unique=True),
+        Index("ix_care_profile_payments_user_id", "user_id"),
+        Index("ix_care_profile_payments_child_id", "child_id"),
+        Index("ix_care_profile_payments_pregnancy_id", "pregnancy_id"),
+        Index("ix_care_profile_payments_payment_type", "payment_type"),
+        Index("ix_care_profile_payments_tx_ref", "tx_ref", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
-    child_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("children.id", ondelete="CASCADE"), nullable=False
+    payment_type: Mapped[str] = mapped_column(
+        String(32), default="child", server_default=text("'child'")
+    )
+    child_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("children.id", ondelete="CASCADE"), nullable=True
+    )
+    pregnancy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pregnancies.id", ondelete="CASCADE"), nullable=True
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="ETB", server_default=text("'ETB'"))
@@ -258,6 +266,10 @@ class ChildPayment(Base):
     raw_payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Backward compatibility alias
+ChildPayment = CareProfilePayment
 
 
 class DoctorReferralCommission(Base):

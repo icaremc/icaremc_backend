@@ -12,6 +12,7 @@ class InitiateIn(BaseModel):
     service_id: UUID | None = None
     doctor_id: UUID | None = None
     child_id: UUID | None = None
+    pregnancy_id: UUID | None = None
     email: str = "patient@icaremc.app"
     first_name: str = "Patient"
     last_name: str = "User"
@@ -21,6 +22,17 @@ class InitiateIn(BaseModel):
 class ChildPaymentStatusOut(BaseModel):
     ok: bool = True
     child_id: UUID
+    payment_status: str
+    amount_paid: Decimal | None = None
+    currency: str = "ETB"
+    payment_method: str | None = None
+    paid_at: str | None = None
+    tx_ref: str | None = None
+
+
+class PregnancyPaymentStatusOut(BaseModel):
+    ok: bool = True
+    pregnancy_id: UUID
     payment_status: str
     amount_paid: Decimal | None = None
     currency: str = "ETB"

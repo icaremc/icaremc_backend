@@ -43,6 +43,12 @@ class Pregnancy(Base):
     embryo_transfer_date: Mapped[date | None] = mapped_column(Date)
     embryo_age_days: Mapped[int | None] = mapped_column(Integer)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_status: Mapped[str] = mapped_column(String(16), default="unpaid", server_default=text("'unpaid'"))
+    amount_paid: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(String(8), default="ETB", server_default=text("'ETB'"))
+    payment_method: Mapped[str | None] = mapped_column(String(32))
+    payment_tx_ref: Mapped[str | None] = mapped_column(Text, unique=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

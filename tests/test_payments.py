@@ -255,3 +255,143 @@ def test_admin_child_payment_management(client, patient_auth, admin_auth):
     assert payments[0]["child_id"] == child_id
     assert payments[0]["status"] == "success"
     assert float(payments[0]["amount"]) == 450.0
+
+
+def test_pregnancy_payment_flow(client, patient_auth):
+    patient_h = auth_header(patient_auth["token"])
+
+    # 1. Create a pregnancy -> starts as unpaid
+    preg_res = client.post(
+        "/api/v1/pregnancies",
+        headers=patient_h,
+        json={
+            "lmp_date": str(date.today() - timedelta(days=60)),
+            "edd": str(date.today() + timedelta(days=220)),
+            "pregnancy_number": 1,
+            "is_first_pregnancy": True,
+        },
+    )
+    assert preg_res.status_code == 200
+    preg = preg_res.json()
+    assert preg["payment_status"] == "unpaid"
+    pregnancy_id = preg["id"]
+
+    # 2. Check pregnancy payment status endpoint
+    status_res = client.get(
+        f"/api/v1/payments/pregnancies/{pregnancy_id}/status",
+        headers=patient_h,
+    )
+    assert status_res.status_code == 200
+    assert status_res.json()["payment_status"] == "unpaid"
+
+    # 3. Initiate payment via Chapa (dev mode)
+    init_res = client.post(
+        "/api/v1/payments/chapa/initiate",
+        headers=patient_h,
+        json={
+            "kind": "pregnancy_registration",
+            "amount": "500.00",
+            "pregnancy_id": pregnancy_id,
+        },
+    )
+    assert init_res.status_code == 200
+    init_body = init_res.json()
+    assert init_body["ok"] is True
+    assert init_body["dev"] is True
+    tx_ref = init_body["tx_ref"]
+    assert "pregnancy_registration" in tx_ref
+
+    # 4. Trigger Chapa Webhook
+    webhook_res = client.post(
+        "/api/v1/payments/chapa/webhook",
+        json={
+            "tx_ref": tx_ref,
+            "status": "success",
+            "amount": "500.00",
+            "reference": "CHAPA-TEST-PREG-12345",
+            "meta": {
+                "kind": "pregnancy_registration",
+                "user_id": patient_auth["user_id"],
+                "pregnancy_id": pregnancy_id,
+            },
+        },
+    )
+    assert webhook_res.status_code == 200
+    assert webhook_res.json().get("type") == "pregnancy_registration"
+
+    # 5. Idempotent webhook check
+    webhook_dup = client.post(
+        "/api/v1/payments/chapa/webhook",
+        json={
+            "tx_ref": tx_ref,
+            "status": "success",
+            "amount": "500.00",
+        },
+    )
+    assert webhook_dup.status_code == 200
+    assert webhook_dup.json().get("idempotent") is True
+
+    # 6. Verify pregnancy is now paid via status endpoint
+    status_after = client.get(
+        f"/api/v1/payments/pregnancies/{pregnancy_id}/status",
+        headers=patient_h,
+    ).json()
+    assert status_after["payment_status"] == "paid"
+    assert float(status_after["amount_paid"]) == 500.0
+    assert status_after["payment_method"] == "chapa"
+    assert status_after["tx_ref"] == tx_ref
+
+    # 7. Check verify transaction endpoint
+    verify_res = client.get(f"/api/v1/payments/verify/{tx_ref}", headers=patient_h)
+    assert verify_res.status_code == 200
+    assert verify_res.json()["status"] == "success"
+    assert verify_res.json()["pregnancy_id"] == pregnancy_id
+
+    # 8. Check patient received confirmation notification
+    p_notifs = client.get("/api/v1/notifications", headers=patient_h).json()
+    assert any(n["type"] == "pregnancy_payment_confirmed" for n in p_notifs)
+
+
+def test_admin_pregnancy_payment_management(client, patient_auth, admin_auth):
+    patient_h = auth_header(patient_auth["token"])
+    admin_h = auth_header(admin_auth["token"])
+
+    # 1. Create a pregnancy
+    preg = client.post(
+        "/api/v1/pregnancies",
+        headers=patient_h,
+        json={
+            "lmp_date": str(date.today() - timedelta(days=90)),
+            "edd": str(date.today() + timedelta(days=190)),
+            "pregnancy_number": 2,
+        },
+    ).json()
+    pregnancy_id = preg["id"]
+    assert preg["payment_status"] == "unpaid"
+
+    # 2. Admin manually activates pregnancy
+    act_res = client.post(
+        f"/api/v1/admin/pregnancies/{pregnancy_id}/activate",
+        headers=admin_h,
+        json={"amount": "450.00", "payment_method": "cash_receipt"},
+    )
+    assert act_res.status_code == 200
+    activated = act_res.json()
+    assert activated["payment_status"] == "paid"
+    assert float(activated["amount_paid"]) == 450.0
+    assert activated["payment_method"] == "cash_receipt"
+
+    # 3. Admin queries care profile payments list filtered by pregnancy_id
+    payments_res = client.get(
+        "/api/v1/admin/care-profile-payments",
+        headers=admin_h,
+        params={"pregnancy_id": pregnancy_id},
+    )
+    assert payments_res.status_code == 200
+    payments = payments_res.json()["payments"]
+    assert len(payments) >= 1
+    assert payments[0]["pregnancy_id"] == pregnancy_id
+    assert payments[0]["payment_type"] == "pregnancy"
+    assert payments[0]["status"] == "success"
+    assert float(payments[0]["amount"]) == 450.0
+

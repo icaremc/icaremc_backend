@@ -7,10 +7,19 @@ import httpx
 
 from app.api.v1.schemas import PaymentInitiateOut, PaymentWebhookOut
 from app.config import EnvironmentOptions, MySettings
-from app.persistence.sqlalchemy.models import AppSubscription, CareSubscription, ChildPayment
+from app.persistence.sqlalchemy.models import (
+    AppSubscription,
+    CareProfilePayment,
+    CareSubscription,
+    ChildPayment,
+)
 from app.resources.errors import not_found, unauthorized, bad_request
 from app.resources.payments.repository import PaymentRepository
-from app.resources.payments.schemas import ChildPaymentStatusOut, InitiateIn
+from app.resources.payments.schemas import (
+    ChildPaymentStatusOut,
+    InitiateIn,
+    PregnancyPaymentStatusOut,
+)
 from app.resources.push.service import dispatch_notification
 
 class PaymentService:
@@ -34,9 +43,31 @@ class PaymentService:
                 raise bad_request("Child profile is already activated")
             child.payment_tx_ref = tx_ref
             self._repo.add(
-                ChildPayment(
+                CareProfilePayment(
                     user_id=user_id,
+                    payment_type="child",
                     child_id=child.id,
+                    amount=body.amount,
+                    currency=body.currency,
+                    status="pending",
+                    tx_ref=tx_ref,
+                    payment_method="chapa",
+                )
+            )
+            await self._repo.flush()
+
+        if (body.kind in ("pregnancy_registration", "pregnancy")) and body.pregnancy_id:
+            pregnancy = await self._repo.get_pregnancy(body.pregnancy_id, user_id)
+            if pregnancy is None:
+                raise not_found("Pregnancy not found")
+            if pregnancy.payment_status == "paid":
+                raise bad_request("Pregnancy profile is already activated")
+            pregnancy.payment_tx_ref = tx_ref
+            self._repo.add(
+                CareProfilePayment(
+                    user_id=user_id,
+                    payment_type="pregnancy",
+                    pregnancy_id=pregnancy.id,
                     amount=body.amount,
                     currency=body.currency,
                     status="pending",
@@ -53,6 +84,7 @@ class PaymentService:
             "service_id": str(body.service_id) if body.service_id else None,
             "doctor_id": str(body.doctor_id) if body.doctor_id else None,
             "child_id": str(body.child_id) if body.child_id else None,
+            "pregnancy_id": str(body.pregnancy_id) if body.pregnancy_id else None,
         }
 
         if not MySettings.CHAPA_SECRET_KEY:
@@ -283,9 +315,10 @@ class PaymentService:
             return PaymentWebhookOut(type="app_subscription", idempotent=True)
         if await self._repo.get_care_sub_by_tx(tx_ref):
             return PaymentWebhookOut(type="care_subscription", idempotent=True)
-        child_payment = await self._repo.get_child_payment_by_tx(tx_ref)
-        if child_payment and child_payment.status == "success":
-            return PaymentWebhookOut(type="child_registration", idempotent=True)
+        care_payment = await self._repo.get_care_payment_by_tx(tx_ref)
+        if care_payment and care_payment.status == "success":
+            out_type = "pregnancy_registration" if (care_payment.payment_type == "pregnancy" or care_payment.pregnancy_id) else "child_registration"
+            return PaymentWebhookOut(type=out_type, idempotent=True)
 
         meta = body.get("meta") or body.get("data", {}).get("meta") or {}
         kind = meta.get("kind")
@@ -378,19 +411,94 @@ class PaymentService:
 
             return PaymentWebhookOut(type="care_subscription")
 
-        if (kind in ("child_registration", "child")) or child_payment:
+        is_pregnancy = (kind in ("pregnancy_registration", "pregnancy")) or (
+            care_payment is not None and (care_payment.payment_type == "pregnancy" or care_payment.pregnancy_id is not None)
+        )
+        is_child = (kind in ("child_registration", "child")) or (
+            care_payment is not None and (care_payment.payment_type == "child" or care_payment.child_id is not None)
+        )
+
+        if is_pregnancy:
             now = datetime.now(UTC)
             amount = Decimal(
                 str(
                     body.get("amount")
                     or body.get("data", {}).get("amount")
-                    or (child_payment.amount if child_payment else 0)
+                    or (care_payment.amount if care_payment else 0)
                 )
             )
-            child_id = (child_payment.child_id if child_payment else None) or (
+            pregnancy_id = (care_payment.pregnancy_id if care_payment else None) or (
+                UUID(meta["pregnancy_id"]) if meta.get("pregnancy_id") else None
+            )
+            target_user_id = (care_payment.user_id if care_payment else None) or (
+                UUID(user_id) if user_id else None
+            )
+
+            pregnancy = await self._repo.get_pregnancy_by_id(pregnancy_id) if pregnancy_id else None
+            if pregnancy:
+                pregnancy.payment_status = "paid"
+                pregnancy.amount_paid = amount
+                pregnancy.payment_method = "chapa"
+                pregnancy.payment_tx_ref = tx_ref
+                pregnancy.paid_at = now
+
+            chapa_ref = str(body.get("reference") or body.get("data", {}).get("reference") or "")
+            if care_payment:
+                care_payment.status = "success"
+                care_payment.completed_at = now
+                if chapa_ref:
+                    care_payment.chapa_reference = chapa_ref
+                care_payment.raw_payload = dict(body)
+            elif target_user_id and pregnancy_id:
+                self._repo.add(
+                    CareProfilePayment(
+                        user_id=target_user_id,
+                        payment_type="pregnancy",
+                        pregnancy_id=pregnancy_id,
+                        amount=amount,
+                        status="success",
+                        tx_ref=tx_ref,
+                        chapa_reference=chapa_ref,
+                        payment_method="chapa",
+                        raw_payload=dict(body),
+                        completed_at=now,
+                    )
+                )
+            await self._repo.flush()
+
+            # Push notification to Patient
+            if target_user_id:
+                await dispatch_notification(
+                    db=self._repo.session,
+                    user_id=target_user_id,
+                    title="Pregnancy Profile Activated",
+                    body="Payment received! Your pregnancy profile is now active.",
+                    type="pregnancy_payment_confirmed",
+                    data={
+                        "type": "pregnancy",
+                        "screen": "pregnancy_detail",
+                        "route": f"/pregnancies/{pregnancy_id}" if pregnancy_id else "/pregnancies",
+                        "resource_id": str(pregnancy_id) if pregnancy_id else None,
+                        "pregnancy_id": str(pregnancy_id) if pregnancy_id else None,
+                    },
+                    is_urgent=True,
+                )
+
+            return PaymentWebhookOut(type="pregnancy_registration")
+
+        if is_child:
+            now = datetime.now(UTC)
+            amount = Decimal(
+                str(
+                    body.get("amount")
+                    or body.get("data", {}).get("amount")
+                    or (care_payment.amount if care_payment else 0)
+                )
+            )
+            child_id = (care_payment.child_id if care_payment else None) or (
                 UUID(meta["child_id"]) if meta.get("child_id") else None
             )
-            target_user_id = (child_payment.user_id if child_payment else None) or (
+            target_user_id = (care_payment.user_id if care_payment else None) or (
                 UUID(user_id) if user_id else None
             )
 
@@ -403,16 +511,17 @@ class PaymentService:
                 child.paid_at = now
 
             chapa_ref = str(body.get("reference") or body.get("data", {}).get("reference") or "")
-            if child_payment:
-                child_payment.status = "success"
-                child_payment.completed_at = now
+            if care_payment:
+                care_payment.status = "success"
+                care_payment.completed_at = now
                 if chapa_ref:
-                    child_payment.chapa_reference = chapa_ref
-                child_payment.raw_payload = dict(body)
+                    care_payment.chapa_reference = chapa_ref
+                care_payment.raw_payload = dict(body)
             elif target_user_id and child_id:
                 self._repo.add(
-                    ChildPayment(
+                    CareProfilePayment(
                         user_id=target_user_id,
+                        payment_type="child",
                         child_id=child_id,
                         amount=amount,
                         status="success",
@@ -462,12 +571,26 @@ class PaymentService:
             tx_ref=child.payment_tx_ref,
         )
 
+    async def get_pregnancy_payment_status(self, pregnancy_id: UUID, user_id: UUID) -> PregnancyPaymentStatusOut:
+        pregnancy = await self._repo.get_pregnancy(pregnancy_id, user_id)
+        if pregnancy is None:
+            raise not_found("Pregnancy not found")
+        return PregnancyPaymentStatusOut(
+            pregnancy_id=pregnancy.id,
+            payment_status=pregnancy.payment_status or "unpaid",
+            amount_paid=pregnancy.amount_paid,
+            currency=pregnancy.currency or "ETB",
+            payment_method=pregnancy.payment_method,
+            paid_at=pregnancy.paid_at.isoformat() if pregnancy.paid_at else None,
+            tx_ref=pregnancy.payment_tx_ref,
+        )
+
     async def verify_transaction(self, tx_ref: str, user_id: UUID) -> dict[str, Any]:
-        child_payment = await self._repo.get_child_payment_by_tx(tx_ref)
-        if child_payment:
-            if child_payment.user_id != user_id:
+        care_payment = await self._repo.get_care_payment_by_tx(tx_ref)
+        if care_payment:
+            if care_payment.user_id != user_id:
                 raise not_found()
-            if child_payment.status != "success" and MySettings.CHAPA_SECRET_KEY:
+            if care_payment.status != "success" and MySettings.CHAPA_SECRET_KEY:
                 try:
                     async with httpx.AsyncClient(timeout=15) as client:
                         resp = await client.get(
@@ -478,27 +601,41 @@ class PaymentService:
                             vdata = resp.json()
                             status_val = vdata.get("status") or (vdata.get("data") or {}).get("status")
                             if status_val in ("success", "successful"):
-                                child = await self._repo.get_child_by_id(child_payment.child_id)
                                 now = datetime.now(UTC)
-                                child_payment.status = "success"
-                                child_payment.completed_at = now
-                                child_payment.raw_payload = vdata
-                                if child:
-                                    child.payment_status = "paid"
-                                    child.amount_paid = child_payment.amount
-                                    child.payment_method = "chapa"
-                                    child.payment_tx_ref = tx_ref
-                                    child.paid_at = now
+                                care_payment.status = "success"
+                                care_payment.completed_at = now
+                                care_payment.raw_payload = vdata
+                                if care_payment.payment_type == "pregnancy" or care_payment.pregnancy_id is not None:
+                                    pregnancy = await self._repo.get_pregnancy_by_id(care_payment.pregnancy_id)
+                                    if pregnancy:
+                                        pregnancy.payment_status = "paid"
+                                        pregnancy.amount_paid = care_payment.amount
+                                        pregnancy.payment_method = "chapa"
+                                        pregnancy.payment_tx_ref = tx_ref
+                                        pregnancy.paid_at = now
+                                else:
+                                    child = await self._repo.get_child_by_id(care_payment.child_id)
+                                    if child:
+                                        child.payment_status = "paid"
+                                        child.amount_paid = care_payment.amount
+                                        child.payment_method = "chapa"
+                                        child.payment_tx_ref = tx_ref
+                                        child.paid_at = now
                                 await self._repo.flush()
                 except Exception:
                     pass
-            return {
+            is_pregnancy = care_payment.payment_type == "pregnancy" or care_payment.pregnancy_id is not None
+            res = {
                 "ok": True,
-                "kind": "child_registration",
+                "kind": "pregnancy_registration" if is_pregnancy else "child_registration",
                 "tx_ref": tx_ref,
-                "status": child_payment.status,
-                "child_id": str(child_payment.child_id),
+                "status": care_payment.status,
             }
+            if is_pregnancy:
+                res["pregnancy_id"] = str(care_payment.pregnancy_id)
+            else:
+                res["child_id"] = str(care_payment.child_id)
+            return res
 
         appt = await self._repo.get_appointment_by_tx(tx_ref)
         if appt and appt.patient_id == user_id:
