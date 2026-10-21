@@ -1242,8 +1242,17 @@ class AdminService:
             )
         ).scalar_one_or_none()
         avail_bal = float(wallet.available_balance) if wallet else 0.0
-        pending_bal = float(wallet.pending_balance) if wallet else 0.0
         currency = wallet.currency if wallet and wallet.currency else "ETB"
+
+        total_pending_row = (
+            await self._repo.session.execute(
+                select(func.sum(DoctorPayoutRequest.amount)).where(
+                    DoctorPayoutRequest.doctor_id == doctor_id,
+                    DoctorPayoutRequest.status == "pending",
+                )
+            )
+        ).scalar_one_or_none()
+        pending_bal = float(total_pending_row or 0)
 
         now = datetime.now(UTC)
         start_of_week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
