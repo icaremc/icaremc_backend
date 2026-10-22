@@ -41,14 +41,15 @@ When the user creates a pregnancy profile or chooses to activate an unpaid pregn
   {
     "kind": "pregnancy_registration",
     "pregnancy_id": "b78ee71c-46a9-45f2-9cb3-112233445566",
-    "amount": 500.00,
-    "currency": "ETB",
     "return_url": "https://yourapp.com/payments/return",
     "email": "patient@example.com",
     "first_name": "Selam",
     "last_name": "Ayen"
   }
   ```
+
+> **Note on Amount:** The `amount` field is optional. The backend automatically enforces the fee configured in the system finance settings (`pregnancyRegistrationFee`).
+
 
 * **Response (200 OK):**
   ```json

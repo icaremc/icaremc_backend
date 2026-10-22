@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.persistence.sqlalchemy.models import (
     Appointment,
+    AppSetting,
     AppSubscription,
     CareProfilePayment,
     CareSubscription,
@@ -32,6 +33,7 @@ class PaymentRepository(Protocol):
     async def get_child_payment_by_tx(self, tx_ref: str) -> CareProfilePayment | None: ...
     async def get_child_by_tx(self, tx_ref: str) -> Child | None: ...
     async def find_payout_by_reference(self, reference: str) -> object | None: ...
+    async def get_setting(self, setting_id: str) -> AppSetting | None: ...
     def add(self, obj: object) -> None: ...
     async def flush(self) -> None: ...
     @property
@@ -111,6 +113,9 @@ class SqlAlchemyPaymentRepository:
             )
         ).scalar_one_or_none()
         return pat
+
+    async def get_setting(self, setting_id: str) -> AppSetting | None:
+        return (await self._db.execute(select(AppSetting).where(AppSetting.id == setting_id))).scalar_one_or_none()
 
     def add(self, obj: object) -> None:
         self._db.add(obj)

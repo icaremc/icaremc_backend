@@ -4,6 +4,7 @@ from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 import httpx
+from sqlalchemy import select
 
 from app.api.v1.schemas import PaymentInitiateOut, PaymentWebhookOut
 from app.config import EnvironmentOptions, MySettings
@@ -12,6 +13,10 @@ from app.persistence.sqlalchemy.models import (
     CareProfilePayment,
     CareSubscription,
     ChildPayment,
+    DoctorPayoutMethod,
+    DoctorProfile,
+    PatientPayoutMethod,
+    User,
 )
 from app.resources.errors import not_found, unauthorized, bad_request
 from app.resources.payments.repository import PaymentRepository
@@ -26,13 +31,71 @@ class PaymentService:
     def __init__(self, repo: PaymentRepository) -> None:
         self._repo = repo
 
+    async def _resolve_profile_amount(self, profile_type: str, fallback_amount: Decimal | None) -> Decimal:
+        finance = await self._repo.get_setting("finance")
+        finance_data = finance.data if finance and isinstance(finance.data, dict) else {}
+
+        raw_val = None
+        if profile_type == "child":
+            for key in (
+                "childRegistrationFee",
+                "childRegistrationAmount",
+                "child_registration_fee",
+                "child_registration_amount",
+                "childPaymentAmount",
+                "child_payment_amount",
+                "child_amount",
+            ):
+                if key in finance_data and finance_data[key] is not None:
+                    raw_val = finance_data[key]
+                    break
+            if raw_val is None:
+                child_setting = await self._repo.get_setting("child_payment")
+                if child_setting and isinstance(child_setting.data, dict):
+                    raw_val = child_setting.data.get("amount") or child_setting.data.get("fee")
+
+        elif profile_type == "pregnancy":
+            for key in (
+                "pregnancyRegistrationFee",
+                "pregnancyRegistrationAmount",
+                "pregnancy_registration_fee",
+                "pregnancy_registration_amount",
+                "pregnancyPaymentAmount",
+                "pregnancy_payment_amount",
+                "pregnancy_amount",
+            ):
+                if key in finance_data and finance_data[key] is not None:
+                    raw_val = finance_data[key]
+                    break
+            if raw_val is None:
+                preg_setting = await self._repo.get_setting("pregnancy_payment")
+                if preg_setting and isinstance(preg_setting.data, dict):
+                    raw_val = preg_setting.data.get("amount") or preg_setting.data.get("fee")
+
+        if raw_val is not None:
+            try:
+                amt = Decimal(str(raw_val))
+                if amt > Decimal("0"):
+                    return amt
+            except (ValueError, TypeError, ArithmeticError):
+                pass
+
+        if fallback_amount is not None and fallback_amount > Decimal("0"):
+            return fallback_amount
+
+        return Decimal("500.00")
+
     async def initiate(self, user_id: UUID, body: InitiateIn) -> PaymentInitiateOut:
         tx_ref = f"icare-{body.kind}-{uuid4().hex[:16]}"
+        effective_amount = body.amount
+
         if body.kind == "appointment" and body.appointment_id:
             appt = await self._repo.get_patient_appointment(body.appointment_id, user_id)
             if appt is None:
                 raise not_found()
             appt.chapa_tx_ref = tx_ref
+            if effective_amount is None:
+                effective_amount = appt.prepayment_amount if (appt.prepayment_amount and appt.prepayment_amount > 0) else appt.total_amount
             await self._repo.flush()
 
         if (body.kind in ("child_registration", "child")) and body.child_id:
@@ -41,13 +104,14 @@ class PaymentService:
                 raise not_found("Child not found")
             if child.payment_status == "paid":
                 raise bad_request("Child profile is already activated")
+            effective_amount = await self._resolve_profile_amount("child", body.amount)
             child.payment_tx_ref = tx_ref
             self._repo.add(
                 CareProfilePayment(
                     user_id=user_id,
                     payment_type="child",
                     child_id=child.id,
-                    amount=body.amount,
+                    amount=effective_amount,
                     currency=body.currency,
                     status="pending",
                     tx_ref=tx_ref,
@@ -62,13 +126,14 @@ class PaymentService:
                 raise not_found("Pregnancy not found")
             if pregnancy.payment_status == "paid":
                 raise bad_request("Pregnancy profile is already activated")
+            effective_amount = await self._resolve_profile_amount("pregnancy", body.amount)
             pregnancy.payment_tx_ref = tx_ref
             self._repo.add(
                 CareProfilePayment(
                     user_id=user_id,
                     payment_type="pregnancy",
                     pregnancy_id=pregnancy.id,
-                    amount=body.amount,
+                    amount=effective_amount,
                     currency=body.currency,
                     status="pending",
                     tx_ref=tx_ref,
@@ -76,6 +141,9 @@ class PaymentService:
                 )
             )
             await self._repo.flush()
+
+        if effective_amount is None or effective_amount <= Decimal("0"):
+            raise bad_request("Payment amount is required and must be greater than zero")
 
         meta = {
             "kind": body.kind,
@@ -91,7 +159,7 @@ class PaymentService:
             return PaymentInitiateOut(tx_ref=tx_ref, checkout_url=None, dev=True, meta=meta)
 
         payload = {
-            "amount": str(body.amount),
+            "amount": str(effective_amount),
             "currency": body.currency,
             "email": body.email,
             "first_name": body.first_name,
@@ -642,6 +710,98 @@ class PaymentService:
             return {"ok": True, "kind": "appointment", "tx_ref": tx_ref, "status": appt.payment_status}
 
         return {"ok": True, "tx_ref": tx_ref, "status": "unknown"}
+
+    def _format_payout_method(self, pm: Any, user_type: str) -> dict[str, Any]:
+        uid = str(pm.doctor_id) if user_type == "doctor" else str(pm.patient_id)
+        return {
+            "id": str(pm.id),
+            "user_id": uid,
+            "userId": uid,
+            "user_type": user_type,
+            "userType": user_type,
+            "doctor_id": str(pm.doctor_id) if user_type == "doctor" else None,
+            "doctorId": str(pm.doctor_id) if user_type == "doctor" else None,
+            "patient_id": str(pm.patient_id) if user_type == "patient" else None,
+            "patientId": str(pm.patient_id) if user_type == "patient" else None,
+            "holder_name": pm.holder_name,
+            "holderName": pm.holder_name,
+            "account_number": pm.account_number,
+            "accountNumber": pm.account_number,
+            "bank_name": pm.bank_name,
+            "bankName": pm.bank_name,
+            "bank_code": pm.bank_code,
+            "bankCode": pm.bank_code,
+            "swift_code": pm.swift_code,
+            "swiftCode": pm.swift_code,
+            "is_active": pm.is_active,
+            "isActive": pm.is_active,
+            "is_default": pm.is_default,
+            "isDefault": pm.is_default,
+            "currency": pm.currency,
+            "created_at": pm.created_at.isoformat() if pm.created_at else None,
+            "createdAt": pm.created_at.isoformat() if pm.created_at else None,
+            "updated_at": pm.updated_at.isoformat() if pm.updated_at else None,
+            "updatedAt": pm.updated_at.isoformat() if pm.updated_at else None,
+        }
+
+    async def get_payment_method(self, target_id: UUID) -> dict[str, Any] | list[dict[str, Any]]:
+        doc_pm = (
+            await self._repo.session.execute(
+                select(DoctorPayoutMethod).where(DoctorPayoutMethod.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if doc_pm is not None:
+            return self._format_payout_method(doc_pm, user_type="doctor")
+
+        pat_pm = (
+            await self._repo.session.execute(
+                select(PatientPayoutMethod).where(PatientPayoutMethod.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if pat_pm is not None:
+            return self._format_payout_method(pat_pm, user_type="patient")
+
+        doc_pms = (
+            await self._repo.session.execute(
+                select(DoctorPayoutMethod)
+                .where(DoctorPayoutMethod.doctor_id == target_id)
+                .order_by(DoctorPayoutMethod.created_at.desc())
+            )
+        ).scalars().all()
+
+        pat_pms = (
+            await self._repo.session.execute(
+                select(PatientPayoutMethod)
+                .where(PatientPayoutMethod.patient_id == target_id)
+                .order_by(PatientPayoutMethod.created_at.desc())
+            )
+        ).scalars().all()
+
+        res: list[dict[str, Any]] = []
+        for pm in doc_pms:
+            res.append(self._format_payout_method(pm, user_type="doctor"))
+        for pm in pat_pms:
+            res.append(self._format_payout_method(pm, user_type="patient"))
+        if res:
+            return res
+
+        user_exists = (
+            await self._repo.session.execute(
+                select(User.id).where(User.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if user_exists:
+            return []
+
+        doc_exists = (
+            await self._repo.session.execute(
+                select(DoctorProfile.id).where(DoctorProfile.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if doc_exists:
+            return []
+
+        raise not_found("Payment method not found")
 
 
 

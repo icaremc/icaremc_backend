@@ -41,14 +41,15 @@ When the user registers a child or chooses to activate an unpaid child profile, 
   {
     "kind": "child_registration",
     "child_id": "a55ff62d-35b8-41a4-a564-cc3ad99896aa",
-    "amount": 10.00,
-    "currency": "ETB",
     "return_url": "https://yourapp.com/payments/return",
     "email": "patient@example.com",
     "first_name": "Abebe",
     "last_name": "Kebede"
   }
   ```
+
+> **Note on Amount:** The `amount` field is optional. The backend automatically enforces the fee configured in the system finance settings (`childRegistrationFee`).
+
 
 * **Response (200 OK):**
   ```json

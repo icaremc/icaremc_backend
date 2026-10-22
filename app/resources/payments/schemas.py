@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class InitiateIn(BaseModel):
     kind: str
-    amount: Decimal
+    amount: Decimal | None = None
     currency: str = "ETB"
     appointment_id: UUID | None = None
     service_id: UUID | None = None
@@ -39,3 +39,23 @@ class PregnancyPaymentStatusOut(BaseModel):
     payment_method: str | None = None
     paid_at: str | None = None
     tx_ref: str | None = None
+
+
+class PaymentMethodOut(BaseModel):
+    model_config = {"extra": "allow"}
+
+    id: UUID
+    holder_name: str
+    account_number: str
+    bank_name: str
+    bank_code: str | None = None
+    swift_code: str | None = None
+    is_active: bool = True
+    is_default: bool = False
+    currency: str = "ETB"
+    user_id: UUID | None = None
+    doctor_id: UUID | None = None
+    patient_id: UUID | None = None
+    user_type: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None

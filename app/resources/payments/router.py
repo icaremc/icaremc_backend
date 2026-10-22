@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request
 
 from app.api.v1.schemas import ChapaBanksOut, PaymentInitiateOut, PaymentWebhookOut
-from app.core.security.deps import RequirePatient
+from app.core.security.deps import RequireAdmin, RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.payments.repository import SqlAlchemyPaymentRepository
 from app.resources.payments.schemas import (
@@ -89,3 +89,11 @@ async def get_pregnancy_payment_status(
     pregnancy_id: UUID, user: RequirePatient, svc: PaymentServiceDep
 ) -> PregnancyPaymentStatusOut:
     return await svc.get_pregnancy_payment_status(pregnancy_id, user.id)
+
+
+@router.get("/payment-methods/{id}")
+@router.get("/payout-methods/{id}")
+async def get_payment_method(
+    id: UUID, user: RequireAdmin, svc: PaymentServiceDep
+) -> dict[str, Any] | list[dict[str, Any]]:
+    return await svc.get_payment_method(id)

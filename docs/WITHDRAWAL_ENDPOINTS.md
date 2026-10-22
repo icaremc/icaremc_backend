@@ -305,7 +305,57 @@ Moves funds from `available_balance` to `pending_balance` awaiting admin approva
 - **Method:** `GET`
 - **Path:** `/api/v1/admin/patient-withdrawals`
 - **Auth:** Bearer Token (`role: admin`)
-- **Response (200 OK):** Returns array of all patient withdrawal requests across the system.
+- **Query Parameters (all optional):**
+  - `status`: Filter by status (`pending`, `approved`, `completed`, `rejected`, `processing`)
+  - `patient_id` / `user_id`: Filter by patient/user UUID
+  - `payout_method_id`: Filter by payout method UUID
+  - `search`: Search patient full name, phone number, note, admin note, or Chapa reference
+  - `min_amount`: Filter minimum withdrawal amount (e.g. `100.00`)
+  - `max_amount`: Filter maximum withdrawal amount (e.g. `5000.00`)
+  - `created_from` / `date_from`: Filter created at timestamp `>= created_from`
+  - `created_to` / `date_to`: Filter created at timestamp `<= created_to`
+  - `limit`: Number of records to return (default: `100`, max: `500`)
+  - `offset`: Number of records to skip (default: `0`)
+  - `page`: Page number (1-based, alternative to `offset`)
+  - `page_size`: Page size (alternative to `limit`)
+  - `envelope`: If `true`, returns `{ "withdrawals": [...], "total": 42, "limit": 100, "offset": 0, "page": 1 }`
+- **Response Headers:**
+  - `X-Total-Count`: Total number of matching records in the system
+  - `X-Limit`: Applied limit
+  - `X-Offset`: Applied offset
+- **Response (200 OK):**
+```json
+[
+  {
+    "id": "211175af-12bc-47d7-a07f-87ee0b42ccf4",
+    "patient_id": "760341e1-8420-4b1b-bd08-68aaef511480",
+    "payout_method_id": "a5c88a25-cd7e-47f7-af92-036444508cd8",
+    "amount": "100.00",
+    "status": "pending",
+    "note": "School supplies payout",
+    "admin_note": null,
+    "payment_date": null,
+    "chapa_transfer_reference": null,
+    "patient_name": "Abebech Gobena",
+    "patient_phone": "0911000000",
+    "patient": {
+      "id": "760341e1-8420-4b1b-bd08-68aaef511480",
+      "full_name": "Abebech Gobena",
+      "phone": "0911000000"
+    },
+    "payout_method": {
+      "id": "a5c88a25-cd7e-47f7-af92-036444508cd8",
+      "holder_name": "Abebech Gobena",
+      "account_number": "1000653707348",
+      "bank_name": "Commercial Bank of Ethiopia",
+      "bank_code": "cbe",
+      "currency": "ETB"
+    },
+    "created_at": "2026-10-19T11:16:01.917Z",
+    "updated_at": "2026-10-19T11:16:01.917Z"
+  }
+]
+```
 
 ---
 
@@ -400,3 +450,44 @@ Moves funds from `available_balance` to `pending_balance` awaiting admin approva
 }
 ```
 *(On `"completed"` / `"approved"`, dispatches transfer via Chapa, clears `pending_balance`, and notifies doctor).*
+
+---
+
+### 4.7 Fetch Payment Method by ID (Admin)
+Fetches payment method details (doctor or patient) using its payment method ID or user ID.
+
+- **Method:** `GET`
+- **Path:** `/api/v1/admin/payment-methods/{id}` *(Alias: `/api/v1/admin/payout-methods/{id}`, `/api/v1/payments/payment-methods/{id}`)*
+- **Auth:** Bearer Token (`role: admin`)
+- **Response (200 OK):**
+```json
+{
+  "id": "a5c88a25-cd7e-47f7-af92-036444508cd8",
+  "user_id": "760341e1-8420-4b1b-bd08-68aaef511480",
+  "user_type": "patient",
+  "patient_id": "760341e1-8420-4b1b-bd08-68aaef511480",
+  "doctor_id": null,
+  "holder_name": "Abebech Gobena",
+  "account_number": "1000653707348",
+  "bank_name": "Commercial Bank of Ethiopia",
+  "bank_code": "cbe",
+  "swift_code": null,
+  "is_active": true,
+  "is_default": true,
+  "currency": "ETB",
+  "created_at": "2026-10-19T11:16:01.917Z",
+  "updated_at": "2026-10-19T11:16:01.917Z"
+}
+```
+*(If `{id}` is a user ID rather than a method ID, returns an array of all payment methods belonging to that user).*
+
+---
+
+### 4.8 List User / Doctor Payment Methods (Admin)
+- **Method:** `GET`
+- **Paths:**
+  - `/api/v1/admin/users/{user_id}/payment-methods`
+  - `/api/v1/admin/doctors/{doctor_id}/payment-methods`
+  - `/api/v1/admin/payment-methods?user_id={user_id}`
+- **Auth:** Bearer Token (`role: admin`)
+- **Response (200 OK):** Returns array of payment methods for the given user/doctor.
