@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, or_, select
@@ -1015,13 +1016,122 @@ class AdminService:
 
         return require_row(req)
 
-    async def list_patient_withdrawals(self) -> list[RowOut]:
-        rows = (
-            await self._repo.session.execute(
-                select(PatientWalletWithdrawalRequest).order_by(PatientWalletWithdrawalRequest.created_at.desc())
+    async def list_patient_withdrawals(
+        self,
+        status: str | None = None,
+        patient_id: UUID | None = None,
+        user_id: UUID | None = None,
+        payout_method_id: UUID | None = None,
+        search: str | None = None,
+        min_amount: Decimal | None = None,
+        max_amount: Decimal | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        envelope: bool = False,
+        response: Any = None,
+    ) -> list[RowOut] | dict[str, Any]:
+        effective_limit = max(1, min(page_size if page_size is not None else limit, 500))
+        effective_offset = max(0, (page - 1) * effective_limit if page is not None else offset)
+
+        from_dt = created_from or date_from
+        to_dt = created_to or date_to
+        target_patient_id = patient_id or user_id
+
+        conditions = []
+        if status and status.strip():
+            conditions.append(PatientWalletWithdrawalRequest.status == status.strip().lower())
+        if target_patient_id:
+            conditions.append(PatientWalletWithdrawalRequest.patient_id == target_patient_id)
+        if payout_method_id:
+            conditions.append(PatientWalletWithdrawalRequest.payout_method_id == payout_method_id)
+        if min_amount is not None:
+            conditions.append(PatientWalletWithdrawalRequest.amount >= min_amount)
+        if max_amount is not None:
+            conditions.append(PatientWalletWithdrawalRequest.amount <= max_amount)
+        if from_dt:
+            conditions.append(PatientWalletWithdrawalRequest.created_at >= from_dt)
+        if to_dt:
+            conditions.append(PatientWalletWithdrawalRequest.created_at <= to_dt)
+
+        if search and search.strip():
+            escaped = f"%{_escape_like(search.strip())}%"
+            conditions.append(
+                or_(
+                    Profile.full_name.ilike(escaped),
+                    Profile.phone.ilike(escaped),
+                    PatientWalletWithdrawalRequest.note.ilike(escaped),
+                    PatientWalletWithdrawalRequest.admin_note.ilike(escaped),
+                    PatientWalletWithdrawalRequest.chapa_transfer_reference.ilike(escaped),
+                )
             )
-        ).scalars().all()
-        return to_rows(list(rows))
+
+        count_stmt = select(func.count(PatientWalletWithdrawalRequest.id)).select_from(PatientWalletWithdrawalRequest)
+        if search and search.strip():
+            count_stmt = count_stmt.outerjoin(Profile, PatientWalletWithdrawalRequest.patient_id == Profile.id)
+        if conditions:
+            count_stmt = count_stmt.where(and_(*conditions))
+
+        total = (await self._repo.session.execute(count_stmt)).scalar_one_or_none() or 0
+
+        stmt = (
+            select(PatientWalletWithdrawalRequest, Profile, PatientPayoutMethod)
+            .outerjoin(Profile, PatientWalletWithdrawalRequest.patient_id == Profile.id)
+            .outerjoin(PatientPayoutMethod, PatientWalletWithdrawalRequest.payout_method_id == PatientPayoutMethod.id)
+        )
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+
+        stmt = (
+            stmt.order_by(PatientWalletWithdrawalRequest.created_at.desc())
+            .offset(effective_offset)
+            .limit(effective_limit)
+        )
+        rows = (await self._repo.session.execute(stmt)).all()
+
+        withdrawals: list[RowOut] = []
+        for req, prof, pm in rows:
+            r_dict = require_row(req).model_dump()
+            if prof:
+                r_dict["patient_name"] = prof.full_name
+                r_dict["patient_phone"] = prof.phone
+                r_dict["patient"] = {
+                    "id": str(prof.id),
+                    "full_name": prof.full_name,
+                    "phone": prof.phone,
+                }
+            if pm:
+                r_dict["payout_method"] = {
+                    "id": str(pm.id),
+                    "holder_name": pm.holder_name,
+                    "account_number": pm.account_number,
+                    "bank_name": pm.bank_name,
+                    "bank_code": pm.bank_code,
+                    "currency": pm.currency,
+                }
+            withdrawals.append(RowOut.model_validate(r_dict))
+
+        if response is not None and hasattr(response, "headers"):
+            response.headers["X-Total-Count"] = str(total)
+            response.headers["X-Limit"] = str(effective_limit)
+            response.headers["X-Offset"] = str(effective_offset)
+
+        if envelope:
+            return {
+                "withdrawals": withdrawals,
+                "items": withdrawals,
+                "total": total,
+                "limit": effective_limit,
+                "offset": effective_offset,
+                "page": page or ((effective_offset // effective_limit) + 1 if effective_limit > 0 else 1),
+            }
+
+        return withdrawals
 
     async def get_patient_withdrawal_review(self, request_id: UUID) -> dict[str, object]:
         req = (
@@ -1558,6 +1668,149 @@ class AdminService:
             transactions.append(wt_dict)
             
         return {"transactions": transactions}
+
+    def _format_payout_method(self, pm: DoctorPayoutMethod | PatientPayoutMethod, user_type: str) -> dict[str, Any]:
+        uid = str(pm.doctor_id) if user_type == "doctor" else str(pm.patient_id)
+        return {
+            "id": str(pm.id),
+            "user_id": uid,
+            "userId": uid,
+            "user_type": user_type,
+            "userType": user_type,
+            "doctor_id": str(pm.doctor_id) if user_type == "doctor" else None,
+            "doctorId": str(pm.doctor_id) if user_type == "doctor" else None,
+            "patient_id": str(pm.patient_id) if user_type == "patient" else None,
+            "patientId": str(pm.patient_id) if user_type == "patient" else None,
+            "holder_name": pm.holder_name,
+            "holderName": pm.holder_name,
+            "account_number": pm.account_number,
+            "accountNumber": pm.account_number,
+            "bank_name": pm.bank_name,
+            "bankName": pm.bank_name,
+            "bank_code": pm.bank_code,
+            "bankCode": pm.bank_code,
+            "swift_code": pm.swift_code,
+            "swiftCode": pm.swift_code,
+            "is_active": pm.is_active,
+            "isActive": pm.is_active,
+            "is_default": pm.is_default,
+            "isDefault": pm.is_default,
+            "currency": pm.currency,
+            "created_at": pm.created_at.isoformat() if pm.created_at else None,
+            "createdAt": pm.created_at.isoformat() if pm.created_at else None,
+            "updated_at": pm.updated_at.isoformat() if pm.updated_at else None,
+            "updatedAt": pm.updated_at.isoformat() if pm.updated_at else None,
+        }
+
+    async def get_payment_method(self, method_id: UUID) -> dict[str, Any]:
+        doc_pm = (
+            await self._repo.session.execute(
+                select(DoctorPayoutMethod).where(DoctorPayoutMethod.id == method_id)
+            )
+        ).scalar_one_or_none()
+        if doc_pm is not None:
+            return self._format_payout_method(doc_pm, user_type="doctor")
+
+        pat_pm = (
+            await self._repo.session.execute(
+                select(PatientPayoutMethod).where(PatientPayoutMethod.id == method_id)
+            )
+        ).scalar_one_or_none()
+        if pat_pm is not None:
+            return self._format_payout_method(pat_pm, user_type="patient")
+
+        raise not_found("Payment method not found")
+
+    async def list_user_payment_methods(self, user_id: UUID) -> list[dict[str, Any]]:
+        doc_pms = (
+            await self._repo.session.execute(
+                select(DoctorPayoutMethod)
+                .where(DoctorPayoutMethod.doctor_id == user_id)
+                .order_by(DoctorPayoutMethod.created_at.desc())
+            )
+        ).scalars().all()
+
+        pat_pms = (
+            await self._repo.session.execute(
+                select(PatientPayoutMethod)
+                .where(PatientPayoutMethod.patient_id == user_id)
+                .order_by(PatientPayoutMethod.created_at.desc())
+            )
+        ).scalars().all()
+
+        res: list[dict[str, Any]] = []
+        for pm in doc_pms:
+            res.append(self._format_payout_method(pm, user_type="doctor"))
+        for pm in pat_pms:
+            res.append(self._format_payout_method(pm, user_type="patient"))
+        return res
+
+    async def get_payment_method_or_by_user(self, target_id: UUID) -> dict[str, Any] | list[dict[str, Any]]:
+        try:
+            return await self.get_payment_method(target_id)
+        except Exception:
+            pass
+
+        user_methods = await self.list_user_payment_methods(target_id)
+        if user_methods:
+            return user_methods
+
+        user_exists = (
+            await self._repo.session.execute(
+                select(User.id).where(User.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if user_exists:
+            return []
+
+        doc_exists = (
+            await self._repo.session.execute(
+                select(DoctorProfile.id).where(DoctorProfile.id == target_id)
+            )
+        ).scalar_one_or_none()
+        if doc_exists:
+            return []
+
+        raise not_found("Payment method not found")
+
+    async def list_payment_methods(
+        self,
+        user_id: UUID | None = None,
+        doctor_id: UUID | None = None,
+        patient_id: UUID | None = None,
+        is_active: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+
+        if doctor_id is None:
+            pat_stmt = select(PatientPayoutMethod)
+            if patient_id is not None:
+                pat_stmt = pat_stmt.where(PatientPayoutMethod.patient_id == patient_id)
+            elif user_id is not None:
+                pat_stmt = pat_stmt.where(PatientPayoutMethod.patient_id == user_id)
+            if is_active is not None:
+                pat_stmt = pat_stmt.where(PatientPayoutMethod.is_active == is_active)
+            pat_stmt = pat_stmt.order_by(PatientPayoutMethod.created_at.desc()).limit(limit).offset(offset)
+            pat_rows = (await self._repo.session.execute(pat_stmt)).scalars().all()
+            for pm in pat_rows:
+                results.append(self._format_payout_method(pm, user_type="patient"))
+
+        if patient_id is None:
+            doc_stmt = select(DoctorPayoutMethod)
+            if doctor_id is not None:
+                doc_stmt = doc_stmt.where(DoctorPayoutMethod.doctor_id == doctor_id)
+            elif user_id is not None:
+                doc_stmt = doc_stmt.where(DoctorPayoutMethod.doctor_id == user_id)
+            if is_active is not None:
+                doc_stmt = doc_stmt.where(DoctorPayoutMethod.is_active == is_active)
+            doc_stmt = doc_stmt.order_by(DoctorPayoutMethod.created_at.desc()).limit(limit).offset(offset)
+            doc_rows = (await self._repo.session.execute(doc_stmt)).scalars().all()
+            for pm in doc_rows:
+                results.append(self._format_payout_method(pm, user_type="doctor"))
+
+        return results
 
     async def grant_membership(self, body: SubscriptionGrantIn) -> RowOut:
         now = datetime.now(UTC)

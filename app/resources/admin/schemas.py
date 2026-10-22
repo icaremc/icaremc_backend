@@ -401,3 +401,23 @@ class ActivateChildIn(BaseModel):
 ActivatePregnancyIn = ActivateChildIn
 ActivateCareProfileIn = ActivateChildIn
 
+
+class PaymentMethodDetailOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: UUID
+    holder_name: str
+    account_number: str
+    bank_name: str
+    bank_code: str | None = None
+    swift_code: str | None = None
+    is_active: bool = True
+    is_default: bool = False
+    currency: str = "ETB"
+    user_id: UUID | None = None
+    doctor_id: UUID | None = None
+    patient_id: UUID | None = None
+    user_type: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+

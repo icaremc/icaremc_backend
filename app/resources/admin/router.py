@@ -1,8 +1,9 @@
 from datetime import date, datetime
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequireAdmin
@@ -119,6 +120,14 @@ async def patch_user_wallet(user_id: UUID, body: WalletBalancePatchIn, user: Req
     return await svc.patch_user_wallet(user_id, body, user)
 
 
+@users_router.get("/users/{user_id}/payment-methods")
+@users_router.get("/users/{user_id}/payout-methods")
+async def get_user_payment_methods(
+    user_id: UUID, user: RequireAdmin, svc: AdminDep
+) -> list[RowOut] | list[dict[str, Any]]:
+    return await svc.list_user_payment_methods(user_id)
+
+
 @doctors_router.get("/doctors")
 async def list_doctors(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
     return await svc.list_doctors()
@@ -170,6 +179,14 @@ async def doctor_document_deliveries(doctor_id: UUID, user: RequireAdmin, svc: A
 @doctors_router.get("/doctors/{doctor_id}/referral-stats")
 async def doctor_referral_stats(doctor_id: UUID, user: RequireAdmin, svc: AdminDep) -> dict[str, object]:
     return await svc.doctor_referral_stats(doctor_id)
+
+
+@doctors_router.get("/doctors/{doctor_id}/payment-methods")
+@doctors_router.get("/doctors/{doctor_id}/payout-methods")
+async def get_doctor_payment_methods(
+    doctor_id: UUID, user: RequireAdmin, svc: AdminDep
+) -> list[RowOut] | list[dict[str, Any]]:
+    return await svc.list_user_payment_methods(doctor_id)
 
 
 @appointments_router.get("/appointments")
@@ -340,8 +357,46 @@ async def payout_action(request_id: UUID, body: PayoutActionIn, user: RequireAdm
 
 
 @finance_router.get("/patient-withdrawals")
-async def list_patient_withdrawals(user: RequireAdmin, svc: AdminDep) -> list[RowOut]:
-    return await svc.list_patient_withdrawals()
+async def list_patient_withdrawals(
+    response: Response,
+    user: RequireAdmin,
+    svc: AdminDep,
+    status: Annotated[str | None, Query(description="Filter by status (pending, approved, completed, rejected, processing)")] = None,
+    patient_id: Annotated[UUID | None, Query(description="Filter by patient ID")] = None,
+    user_id: Annotated[UUID | None, Query(description="Filter by user ID (alias for patient_id)")] = None,
+    payout_method_id: Annotated[UUID | None, Query(description="Filter by payout method ID")] = None,
+    search: Annotated[str | None, Query(description="Search by patient name, phone, note, admin note, or reference")] = None,
+    min_amount: Annotated[Decimal | None, Query(description="Filter by minimum amount")] = None,
+    max_amount: Annotated[Decimal | None, Query(description="Filter by maximum amount")] = None,
+    created_from: Annotated[datetime | None, Query(description="Filter by created_at >= created_from")] = None,
+    created_to: Annotated[datetime | None, Query(description="Filter by created_at <= created_to")] = None,
+    date_from: Annotated[datetime | None, Query(description="Alias for created_from")] = None,
+    date_to: Annotated[datetime | None, Query(description="Alias for created_to")] = None,
+    page: Annotated[int | None, Query(ge=1, description="Page number (1-based, alternative to offset)")] = None,
+    page_size: Annotated[int | None, Query(ge=1, le=500, description="Page size (alternative to limit)")] = None,
+    limit: Annotated[int, Query(ge=1, le=500, description="Page limit (default 100, max 500)")] = 100,
+    offset: Annotated[int, Query(ge=0, description="Page offset (default 0)")] = 0,
+    envelope: Annotated[bool, Query(description="Wrap response in an envelope object with total and pagination metadata")] = False,
+) -> list[RowOut] | dict[str, Any]:
+    return await svc.list_patient_withdrawals(
+        response=response,
+        status=status,
+        patient_id=patient_id,
+        user_id=user_id,
+        payout_method_id=payout_method_id,
+        search=search,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        created_from=created_from,
+        created_to=created_to,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        page_size=page_size,
+        limit=limit,
+        offset=offset,
+        envelope=envelope,
+    )
 
 
 @finance_router.get("/patient-withdrawals/{request_id}")
@@ -376,6 +431,38 @@ async def wallet_transactions(
         type=type,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@finance_router.get("/payment-methods/{id}")
+@finance_router.get("/payout-methods/{id}")
+async def get_payment_method(
+    id: UUID,
+    user: RequireAdmin,
+    svc: AdminDep,
+) -> RowOut | list[RowOut] | dict[str, Any]:
+    return await svc.get_payment_method_or_by_user(id)
+
+
+@finance_router.get("/payment-methods")
+@finance_router.get("/payout-methods")
+async def list_payment_methods(
+    user: RequireAdmin,
+    svc: AdminDep,
+    user_id: Annotated[UUID | None, Query(description="Filter by user ID")] = None,
+    doctor_id: Annotated[UUID | None, Query(description="Filter by doctor ID")] = None,
+    patient_id: Annotated[UUID | None, Query(description="Filter by patient ID")] = None,
+    is_active: Annotated[bool | None, Query(description="Filter by active status")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RowOut] | list[dict[str, Any]]:
+    return await svc.list_payment_methods(
+        user_id=user_id,
+        doctor_id=doctor_id,
+        patient_id=patient_id,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
     )
 
 
