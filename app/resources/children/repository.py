@@ -18,8 +18,11 @@ from app.persistence.sqlalchemy.models import (
 class ChildrenRepository(Protocol):
     async def list_children(self, user_id: UUID) -> list[Child]: ...
     async def get_child(self, child_id: UUID, user_id: UUID) -> Child | None: ...
+    async def get_measurement(self, measurement_id: UUID, user_id: UUID) -> ChildGrowthMeasurement | None: ...
     async def list_measurements(self, user_id: UUID, child_local_id: str) -> list[ChildGrowthMeasurement]: ...
+    async def get_milestone(self, milestone_id: UUID, user_id: UUID) -> ChildMilestoneCheck | None: ...
     async def list_milestones(self, user_id: UUID, child_local_id: str) -> list[ChildMilestoneCheck]: ...
+    async def get_vaccine_by_id(self, vaccine_id: UUID, user_id: UUID) -> ChildVaccineRecord | None: ...
     async def list_vaccines(self, user_id: UUID, child_local_id: str) -> list[ChildVaccineRecord]: ...
     async def get_vaccine(self, user_id: UUID, child_local_id: str, vaccine_key: str) -> ChildVaccineRecord | None: ...
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[ChildFollowupVisit]: ...
@@ -49,6 +52,16 @@ class SqlAlchemyChildrenRepository:
             await self._db.execute(select(Child).where(Child.id == child_id, Child.user_id == user_id))
         ).scalar_one_or_none()
 
+    async def get_measurement(self, measurement_id: UUID, user_id: UUID) -> ChildGrowthMeasurement | None:
+        return (
+            await self._db.execute(
+                select(ChildGrowthMeasurement).where(
+                    ChildGrowthMeasurement.id == measurement_id,
+                    ChildGrowthMeasurement.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
     async def list_measurements(self, user_id: UUID, child_local_id: str) -> list[ChildGrowthMeasurement]:
         return list(
             (
@@ -63,6 +76,16 @@ class SqlAlchemyChildrenRepository:
             .all()
         )
 
+    async def get_milestone(self, milestone_id: UUID, user_id: UUID) -> ChildMilestoneCheck | None:
+        return (
+            await self._db.execute(
+                select(ChildMilestoneCheck).where(
+                    ChildMilestoneCheck.id == milestone_id,
+                    ChildMilestoneCheck.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+
     async def list_milestones(self, user_id: UUID, child_local_id: str) -> list[ChildMilestoneCheck]:
         return list(
             (
@@ -76,6 +99,16 @@ class SqlAlchemyChildrenRepository:
             .scalars()
             .all()
         )
+
+    async def get_vaccine_by_id(self, vaccine_id: UUID, user_id: UUID) -> ChildVaccineRecord | None:
+        return (
+            await self._db.execute(
+                select(ChildVaccineRecord).where(
+                    ChildVaccineRecord.id == vaccine_id,
+                    ChildVaccineRecord.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
 
     async def list_vaccines(self, user_id: UUID, child_local_id: str) -> list[ChildVaccineRecord]:
         return list(

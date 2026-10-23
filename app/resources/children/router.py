@@ -63,6 +63,11 @@ async def list_measurements(user: RequirePatient, child_local_id: str, svc: Chil
     return await svc.list_measurements(user.id, child_local_id)
 
 
+@router.delete("/child-measurements/{measurement_id}", status_code=204)
+async def delete_measurement(measurement_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> None:
+    await svc.delete_measurement(measurement_id, user.id)
+
+
 @router.post("/child-milestones")
 async def add_milestone(body: MilestoneIn, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
     return await svc.add_milestone(user.id, body)
@@ -73,6 +78,11 @@ async def list_milestones(user: RequirePatient, child_local_id: str, svc: Childr
     return await svc.list_milestones(user.id, child_local_id)
 
 
+@router.delete("/child-milestones/{milestone_id}", status_code=204)
+async def delete_milestone(milestone_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> None:
+    await svc.delete_milestone(milestone_id, user.id)
+
+
 @router.post("/child-vaccines")
 async def upsert_vaccine(body: VaccineIn, user: RequirePatient, svc: ChildrenServiceDep) -> RowOut:
     return await svc.upsert_vaccine(user.id, body)
@@ -81,6 +91,11 @@ async def upsert_vaccine(body: VaccineIn, user: RequirePatient, svc: ChildrenSer
 @router.get("/child-vaccines")
 async def list_vaccines(user: RequirePatient, child_local_id: str, svc: ChildrenServiceDep) -> list[RowOut]:
     return await svc.list_vaccines(user.id, child_local_id)
+
+
+@router.delete("/child-vaccines/{vaccine_id}", status_code=204)
+async def delete_vaccine(vaccine_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> None:
+    await svc.delete_vaccine(vaccine_id, user.id)
 
 
 @router.get("/child-followups")
@@ -110,4 +125,3 @@ async def list_published_followup_templates(user: RequirePatient, svc: ChildrenS
 @router.post("/children/{child_id}/backfill-followups")
 async def backfill_followups(child_id: UUID, user: RequirePatient, svc: ChildrenServiceDep) -> list[RowOut]:
     return await svc.backfill_followups(child_id, user.id)
-

@@ -140,6 +140,13 @@ class ChildrenService:
     async def list_measurements(self, user_id: UUID, child_local_id: str) -> list[RowOut]:
         return to_rows(await self._repo.list_measurements(user_id, child_local_id))
 
+    async def delete_measurement(self, measurement_id: UUID, user_id: UUID) -> None:
+        row = await self._repo.get_measurement(measurement_id, user_id)
+        if row is None:
+            raise not_found()
+        await self._repo.delete(row)
+        await self._repo.flush()
+
     async def add_milestone(self, user_id: UUID, body: MilestoneIn) -> RowOut:
         row = ChildMilestoneCheck(user_id=user_id, **body.model_dump())
         self._repo.add(row)
@@ -148,6 +155,13 @@ class ChildrenService:
 
     async def list_milestones(self, user_id: UUID, child_local_id: str) -> list[RowOut]:
         return to_rows(await self._repo.list_milestones(user_id, child_local_id))
+
+    async def delete_milestone(self, milestone_id: UUID, user_id: UUID) -> None:
+        row = await self._repo.get_milestone(milestone_id, user_id)
+        if row is None:
+            raise not_found()
+        await self._repo.delete(row)
+        await self._repo.flush()
 
     async def upsert_vaccine(self, user_id: UUID, body: VaccineIn) -> RowOut:
         existing = await self._repo.get_vaccine(user_id, body.child_local_id, body.vaccine_key)
@@ -163,6 +177,13 @@ class ChildrenService:
 
     async def list_vaccines(self, user_id: UUID, child_local_id: str) -> list[RowOut]:
         return to_rows(await self._repo.list_vaccines(user_id, child_local_id))
+
+    async def delete_vaccine(self, vaccine_id: UUID, user_id: UUID) -> None:
+        row = await self._repo.get_vaccine_by_id(vaccine_id, user_id)
+        if row is None:
+            raise not_found()
+        await self._repo.delete(row)
+        await self._repo.flush()
 
     async def list_followups(self, user_id: UUID, child_local_id: str) -> list[RowOut]:
         pairs = await self._repo.list_followups_with_template(user_id, child_local_id)
