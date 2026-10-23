@@ -178,6 +178,72 @@ def test_delete_child(client, patient_auth):
     assert client.get("/api/v1/child-followups", headers=h, params={"child_local_id": "baby-del-test"}).json() == []
 
 
+def test_delete_child_measurement_milestone_and_vaccine(client, patient_auth, unique_phone):
+    h = auth_header(patient_auth["token"])
+    child_local_id = f"baby-delete-records-{uuid4().hex[:8]}"
+
+    measurement = client.post(
+        "/api/v1/child-measurements",
+        headers=h,
+        json={"child_local_id": child_local_id, "weight_kg": 4.5},
+    )
+    milestone = client.post(
+        "/api/v1/child-milestones",
+        headers=h,
+        json={"child_local_id": child_local_id, "item_key": "smile"},
+    )
+    vaccine = client.post(
+        "/api/v1/child-vaccines",
+        headers=h,
+        json={"child_local_id": child_local_id, "vaccine_key": "bcg", "vaccine_name": "BCG"},
+    )
+    assert measurement.status_code == milestone.status_code == vaccine.status_code == 200
+
+    # Cross-user isolation: another patient cannot delete these records
+    other_phone = unique_phone("99")
+    other_otp = client.post("/api/v1/auth/patient/otp", json={"phone": other_phone}).json()
+    other_signup = client.post(
+        "/api/v1/auth/patient/signup",
+        json={
+            "phone": other_phone,
+            "password": "secret12",
+            "otp": other_otp["dev_code"],
+            "full_name": "Other Mother",
+        },
+    )
+    other_h = auth_header(other_signup.json()["access_token"])
+
+    for endpoint, record in (
+        ("child-measurements", measurement.json()),
+        ("child-milestones", milestone.json()),
+        ("child-vaccines", vaccine.json()),
+    ):
+        forbidden_del = client.delete(f"/api/v1/{endpoint}/{record['id']}", headers=other_h)
+        assert forbidden_del.status_code == 404
+
+    for endpoint, record in (
+        ("child-measurements", measurement.json()),
+        ("child-milestones", milestone.json()),
+        ("child-vaccines", vaccine.json()),
+    ):
+        deleted = client.delete(f"/api/v1/{endpoint}/{record['id']}", headers=h)
+        assert deleted.status_code == 204
+
+    assert client.get(
+        "/api/v1/child-measurements", headers=h, params={"child_local_id": child_local_id}
+    ).json() == []
+    assert client.get(
+        "/api/v1/child-milestones", headers=h, params={"child_local_id": child_local_id}
+    ).json() == []
+    assert client.get(
+        "/api/v1/child-vaccines", headers=h, params={"child_local_id": child_local_id}
+    ).json() == []
+
+    for endpoint in ("child-measurements", "child-milestones", "child-vaccines"):
+        missing = client.delete(f"/api/v1/{endpoint}/{uuid4()}", headers=h)
+        assert missing.status_code == 404
+
+
 def test_followup_visit_checklist_and_patch(client, patient_auth):
     h = auth_header(patient_auth["token"])
 
@@ -279,6 +345,5 @@ def test_followup_visit_checklist_and_patch(client, patient_auth):
     assert patched["checklist"]["growth_done"] is True
     assert patched["checklist"]["notes"] == "Child is feeding and sleeping well."
     assert patched["template"]["label"] == "2 months checkup"
-
 
 
