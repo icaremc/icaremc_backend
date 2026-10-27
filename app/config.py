@@ -66,5 +66,11 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = "static"
     MEDIA_URL_PREFIX: str = "/static"
 
+    # Agora RTC (video calls)
+    AGORA_APP_ID: str = ""
+    AGORA_APP_CERTIFICATE: str = ""
+    VIDEO_CALL_MAX_SECONDS: int = 900
+    VIDEO_CALL_WARN_SECONDS: int = 120
+
 
 MySettings = Settings()  # pyright: ignore[reportCallIssue]

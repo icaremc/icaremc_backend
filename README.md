@@ -29,6 +29,16 @@ Photo / voice notes (patient + doctor):
 - Send message may include `message_type`, `file_path`, `duration_ms`
 - Files stored under `static/chat/…` and served at `/static/chat/…`
 
+## Video calls (Agora, 15 minutes)
+
+Set `AGORA_APP_ID` and `AGORA_APP_CERTIFICATE` in `.env`.
+
+- Doctor starts: `POST /api/v1/doctor/video-calls` `{ "conversation_id": "…" }`
+- Patient/doctor join: `POST /api/v1/video-calls/{id}/join` or `/api/v1/doctor/video-calls/{id}/join`
+- End: `…/end`
+- Active for conversation: `GET …/video-calls/active?conversation_id=`
+- Max duration: `VIDEO_CALL_MAX_SECONDS` (default 900). One active call per doctor.
+
 After pull: `alembic -c app/persistence/sqlalchemy/alembic.ini upgrade head`
 
 ## Tests

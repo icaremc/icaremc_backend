@@ -23,3 +23,7 @@ def forbidden(detail: str = "Forbidden") -> AppError:
 
 def conflict(detail: str) -> AppError:
     return AppError(409, detail)
+
+
+def service_unavailable(detail: str = "Service Unavailable") -> AppError:
+    return AppError(503, detail)
