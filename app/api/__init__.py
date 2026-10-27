@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     os.makedirs("static/uploads", exist_ok=True)
+    os.makedirs("static/chat", exist_ok=True)
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
     return register_exception_handlers(app)

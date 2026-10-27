@@ -14,6 +14,7 @@ project_structure_guide.md
 
 # Uploads
 static/uploads/
+static/chat/
 local_files/
 *.sql
 check_storage_delta.sh

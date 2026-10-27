@@ -61,5 +61,10 @@ class Settings(BaseSettings):
     FIREBASE_UNIVERSE_DOMAIN: str = "googleapis.com"
     FIREBASE_CREDENTIALS_PATH: str = ""
 
+    # Chat media files live under MEDIA_ROOT and are served at MEDIA_URL_PREFIX.
+    # Default matches existing StaticFiles mount on /static.
+    MEDIA_ROOT: str = "static"
+    MEDIA_URL_PREFIX: str = "/static"
+
 
 MySettings = Settings()  # pyright: ignore[reportCallIssue]

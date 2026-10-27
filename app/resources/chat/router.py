@@ -1,13 +1,13 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 
 from app.api.v1.schemas import RowOut
 from app.core.security.deps import RequirePatient
 from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.chat.repository import SqlAlchemyChatRepository
-from app.resources.chat.schemas import ChatIn
+from app.resources.chat.schemas import AttachmentOut, ChatIn
 from app.resources.chat.service import ChatService
 
 router = APIRouter(tags=["mother"])
@@ -28,6 +28,16 @@ async def chat_conversations(user: RequirePatient, svc: ChatServiceDep) -> list[
 @router.get("/chat/conversations/{conversation_id}/messages")
 async def chat_messages(conversation_id: UUID, user: RequirePatient, svc: ChatServiceDep) -> list[RowOut]:
     return await svc.messages_patient(conversation_id, user.id)
+
+
+@router.post("/chat/conversations/{conversation_id}/attachments")
+async def upload_chat_attachment(
+    conversation_id: UUID,
+    user: RequirePatient,
+    svc: ChatServiceDep,
+    file: UploadFile = File(...),
+) -> AttachmentOut:
+    return await svc.upload_patient(conversation_id, user.id, file)
 
 
 @router.post("/chat/conversations/{conversation_id}/messages")

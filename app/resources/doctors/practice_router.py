@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 
 from app.api.v1.schemas import OkOut, RowOut, WalletBundleOut
@@ -10,7 +10,7 @@ from app.persistence.sqlalchemy.deps import DbDep
 from app.resources.appointments.router import get_appointment_service
 from app.resources.appointments.service import AppointmentService
 from app.resources.chat.router import get_chat_service
-from app.resources.chat.schemas import ChatIn
+from app.resources.chat.schemas import AttachmentOut, ChatIn
 from app.resources.chat.service import ChatService
 from app.resources.doctors.practice import PracticeService
 from app.resources.doctors.practice_repository import SqlAlchemyPracticeRepository
@@ -160,6 +160,16 @@ async def conversations(user: RequireDoctor, svc: ChatDep) -> list[RowOut]:
 @router.get("/chat/conversations/{conversation_id}/messages")
 async def messages(conversation_id: UUID, user: RequireDoctor, svc: ChatDep) -> list[RowOut]:
     return await svc.messages_doctor(conversation_id, user.id)
+
+
+@router.post("/chat/conversations/{conversation_id}/attachments")
+async def upload_chat_attachment(
+    conversation_id: UUID,
+    user: RequireDoctor,
+    svc: ChatDep,
+    file: UploadFile = File(...),
+) -> AttachmentOut:
+    return await svc.upload_doctor(conversation_id, user.id, file)
 
 
 @router.post("/chat/conversations/{conversation_id}/messages")
