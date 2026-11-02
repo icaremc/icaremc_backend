@@ -1,0 +1,91 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: icaremc-database
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    ports:
+      # Bind to localhost only for security (not exposed to the public internet)
+      - "127.0.0.1:5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-app_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-app_db}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  alembic:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: icaremc-alembic
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Automatically runs pending database migrations upon deployment
+    entrypoint: [ "alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini", "upgrade", "head" ]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: icaremc-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      alembic:
+        condition: service_completed_successfully
+    ports:
+      # Exposes API on port 8000 (bind to 127.0.0.1 if using Nginx/Caddy reverse proxy)
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist user attachments and uploads on host disk
+      - ./static/uploads:/opt/app/static/uploads
+      - ./static/chat:/opt/app/static/chat
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  reminders-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: icaremc-reminders-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      alembic:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    networks:
+      - app-network
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REMINDERS_INTERVAL_HOURS=24
+      - REMINDERS_RUN_ON_STARTUP=true
+    command: [ "python", "-m", "app.jobs.daemon" ]
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
