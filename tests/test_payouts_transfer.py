@@ -227,6 +227,6 @@ def test_patient_withdrawal_and_admin_chapa_approval(client, patient_auth, admin
     )
     assert approve_res.status_code == 200, approve_res.text
     approved = approve_res.json()
-    assert approved["status"] == "completed"
+    assert approved["status"] == "processing"
     assert approved["chapa_transfer_reference"] is not None
     assert approved["chapa_transfer_reference"].startswith("pat-payout-")

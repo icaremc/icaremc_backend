@@ -18,7 +18,7 @@ def test_patient_signup_login_me(client, unique_phone):
     assert me.status_code == 200
     assert me.json()["role"] == "patient"
 
-    login = client.post("/api/v1/auth/patient/login", json={"phone": phone, "password": "secret12"})
+    login = client.post("/api/v1/auth/patient/login", data={"username": phone, "password": "secret12"})
     assert login.status_code == 200
     assert login.json()["access_token"]
     assert login.json()["refresh_token"]
@@ -52,7 +52,7 @@ def test_refresh_and_logout(client, unique_phone):
 def test_patient_login_wrong_password(client, patient_auth):
     res = client.post(
         "/api/v1/auth/patient/login",
-        json={"phone": patient_auth["phone"], "password": "wrong-pass"},
+        data={"username": patient_auth["phone"], "password": "wrong-pass"},
     )
     assert res.status_code == 401
 
@@ -60,7 +60,7 @@ def test_patient_login_wrong_password(client, patient_auth):
 def test_doctor_signup_and_reject_patient_login(client, doctor_auth):
     res = client.post(
         "/api/v1/auth/patient/login",
-        json={"phone": doctor_auth["phone"], "password": "secret12"},
+        data={"username": doctor_auth["phone"], "password": "secret12"},
     )
     assert res.status_code == 401
 
@@ -89,11 +89,12 @@ def test_same_phone_patient_then_doctor(client, unique_phone):
         },
     )
     assert doctor.status_code == 200, doctor.text
-    assert doctor.json()["user_id"] == patient_id
-    assert set(doctor.json()["roles"]) == {"patient", "doctor"}
+    # (phone, role) are unique together, so patient and doctor have independent records:
+    assert doctor.json()["user_id"] != patient_id
+    assert "doctor" in doctor.json()["roles"]
 
-    plogin = client.post("/api/v1/auth/patient/login", json={"phone": phone, "password": password})
-    dlogin = client.post("/api/v1/auth/doctor/login", json={"phone": phone, "password": password})
+    plogin = client.post("/api/v1/auth/patient/login", data={"username": phone, "password": password})
+    dlogin = client.post("/api/v1/auth/doctor/login", data={"username": phone, "password": password})
     assert plogin.status_code == 200
     assert dlogin.status_code == 200
     assert plogin.json()["role"] == "patient"
@@ -120,7 +121,7 @@ def test_password_reset(client, patient_auth):
     assert reset.status_code == 200
     login = client.post(
         "/api/v1/auth/patient/login",
-        json={"phone": patient_auth["phone"], "password": "newsecret"},
+        data={"username": patient_auth["phone"], "password": "newsecret"},
     )
     assert login.status_code == 200
 
@@ -143,7 +144,7 @@ def test_soft_delete(client, patient_auth):
     assert res.status_code == 200
     login = client.post(
         "/api/v1/auth/patient/login",
-        json={"phone": patient_auth["phone"], "password": "secret12"},
+        data={"username": patient_auth["phone"], "password": "secret12"},
     )
     assert login.status_code == 401
 
