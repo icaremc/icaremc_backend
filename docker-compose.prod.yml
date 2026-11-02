@@ -11,11 +11,11 @@ services:
       # Bind to localhost only for security (not exposed to the public internet)
       - "127.0.0.1:5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-app_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-      - POSTGRES_DB=${POSTGRES_DB:-app_db}
+      - POSTGRES_USER=${POSTGRES_USER:-root}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mcdb202icare}
+      - POSTGRES_DB=${POSTGRES_DB:-icaremc_backend}
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,8 +34,10 @@ services:
       - app-network
     environment:
       - PYTHONUNBUFFERED=1
+      # Connect to internal 'db' container over app-network
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-mcdb202icare}@db:5432/${POSTGRES_DB:-icaremc_backend}
     # Automatically runs pending database migrations upon deployment
-    entrypoint: [ "alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini", "upgrade", "head" ]
+    entrypoint: ["alembic", "-c", "/opt/app/app/persistence/sqlalchemy/alembic.ini", "upgrade", "head"]
 
   app:
     build:
@@ -49,7 +51,7 @@ services:
       alembic:
         condition: service_completed_successfully
     ports:
-      # Exposes API on port 8000 (bind to 127.0.0.1 if using Nginx/Caddy reverse proxy)
+      # Exposes API on port 8000
       - "8000:8000"
     env_file:
       - .env
@@ -61,6 +63,8 @@ services:
       - app-network
     environment:
       - PYTHONUNBUFFERED=1
+      # Connect to internal 'db' container over app-network
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-mcdb202icare}@db:5432/${POSTGRES_DB:-icaremc_backend}
 
   reminders-worker:
     build:
@@ -79,12 +83,16 @@ services:
       - app-network
     environment:
       - PYTHONUNBUFFERED=1
+      # Connect to internal 'db' container over app-network
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-mcdb202icare}@db:5432/${POSTGRES_DB:-icaremc_backend}
       - REMINDERS_INTERVAL_HOURS=24
       - REMINDERS_RUN_ON_STARTUP=true
-    command: [ "python", "-m", "app.jobs.daemon" ]
+    command: ["python", "-m", "app.jobs.daemon"]
 
 volumes:
   postgres_data:
+    # Explicit global volume name: prevents data loss across different project folder locations
+    name: ${POSTGRES_VOLUME_NAME:-icaremc_postgres_data}
 
 networks:
   app-network:
