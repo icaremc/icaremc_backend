@@ -1,0 +1,86 @@
+name: CD - Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch or Git ref to deploy"
+        required: true
+        default: "main"
+
+concurrency:
+  group: production-vps-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to VPS via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Remote Server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            TARGET_DIR="${{ secrets.VPS_DEPLOY_PATH }}"
+            DEPLOY_REF="${{ github.event.inputs.branch || 'main' }}"
+
+            echo "=== [1/6] Navigating to deployment directory ==="
+            if [ ! -d "$TARGET_DIR" ]; then
+              echo "Error: Directory $TARGET_DIR does not exist on VPS!"
+              exit 1
+            fi
+            cd "$TARGET_DIR"
+
+            echo "=== [2/6] Pulling latest changes from git ($DEPLOY_REF) ==="
+            git fetch --all --tags --prune
+            git checkout "$DEPLOY_REF"
+            git pull origin "$DEPLOY_REF"
+
+            echo "=== [3/6] Ensuring storage directories exist ==="
+            mkdir -p static/uploads static/chat
+
+            echo "=== [4/6] Building production containers ==="
+            docker compose -f docker-compose.prod.yml build --pull
+
+            echo "=== [5/6] Starting services and running database migrations ==="
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            echo "=== [6/6] Verifying application health ==="
+            HEALTH_URL="http://127.0.0.1:8000/api/v1/health"
+            MAX_RETRIES=15
+            WAIT_SECONDS=2
+            SUCCESS=0
+
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "Checking health endpoint (attempt $i/$MAX_RETRIES)..."
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || true)
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "Health check passed with HTTP 200!"
+                SUCCESS=1
+                break
+              fi
+              sleep $WAIT_SECONDS
+            done
+
+            if [ "$SUCCESS" -ne 1 ]; then
+              echo "Health check failed after $MAX_RETRIES attempts! Container logs:"
+              docker compose -f docker-compose.prod.yml logs --tail 50 app
+              exit 1
+            fi
+
+            echo "=== Cleaning up dangling images ==="
+            docker image prune -f
+
+            echo "Deployment completed successfully!"

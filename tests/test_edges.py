@@ -85,7 +85,8 @@ def test_dual_role_wrong_password_rejected(client, unique_phone):
         == 200
     )
     dotp = client.post("/api/v1/auth/doctor/otp", json={"phone": phone}).json()["dev_code"]
-    bad = client.post(
+    # With role-scoped auth, patient and doctor accounts with same phone can have different passwords
+    doc_signup = client.post(
         "/api/v1/auth/doctor/signup",
         json={
             "phone": phone,
@@ -95,8 +96,12 @@ def test_dual_role_wrong_password_rejected(client, unique_phone):
             "last_name": "Y",
         },
     )
-    assert bad.status_code == 400
-    assert "password" in bad.json()["detail"].lower()
+    assert doc_signup.status_code == 200
+
+    # Requesting signup OTP again for an already registered doctor role is rejected
+    dotp2_res = client.post("/api/v1/auth/doctor/otp", json={"phone": phone}).json()
+    assert dotp2_res["ok"] is False
+    assert "already registered" in dotp2_res["detail"].lower()
 
 
 def test_double_book_same_slot_conflict(client, patient_auth, doctor_auth, admin_auth, unique_phone):
