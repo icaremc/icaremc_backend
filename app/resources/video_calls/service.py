@@ -192,9 +192,10 @@ class VideoCallService:
                 {
                     "type": "video_call",
                     "screen": "patient_video_call",
-                    "route": f"/video-call/{session.id}",
+                    "route": "/incoming-video-call",
                     "call_id": str(session.id),
                     "conversation_id": str(conv.id),
+                    "caller_name": doc_name,
                     "click_action": "FLUTTER_NOTIFICATION_CLICK",
                 },
             )

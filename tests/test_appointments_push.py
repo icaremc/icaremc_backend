@@ -25,7 +25,7 @@ def test_appointment_notifications_lifecycle(client, patient_auth, doctor_auth, 
     # 3. Patient registers FCM token
     client.patch("/api/v1/profile", headers=patient_h, json={"fcm_token": "patient_token_xyz"})
 
-    # 4. Patient books appointment -> Doctor receives notification
+    # 4. Patient books appointment -> no "booked for..." doctor alert
     appt = client.post(
         "/api/v1/appointments",
         headers=patient_h,
@@ -39,11 +39,14 @@ def test_appointment_notifications_lifecycle(client, patient_auth, doctor_auth, 
     assert appt.status_code == 200
     appt_id = appt.json()["id"]
 
-    # Verify doctor received notification in their inbox
     doc_notifs = client.get("/api/v1/doctor/notifications", headers=doctor_h).json()
-    assert any(n["type"] == "appointment_new" for n in doc_notifs)
-    new_notif = next(n for n in doc_notifs if n["type"] == "appointment_new")
-    assert "09:00" in new_notif["body"]
+    assert not any(n["type"] == "appointment_new" for n in doc_notifs)
+
+    # Patient gets a booking confirmation to show on the home screen
+    patient_booked = client.get("/api/v1/notifications", headers=patient_h).json()
+    assert any(n["type"] == "appointment_booked" for n in patient_booked)
+    booked = next(n for n in patient_booked if n["type"] == "appointment_booked")
+    assert booked["data"]["notification_type"] == "appointment_booked"
 
     # 5. Doctor confirms appointment -> Patient receives confirmed notification
     status_resp = client.post(

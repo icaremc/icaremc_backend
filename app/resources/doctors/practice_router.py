@@ -188,6 +188,11 @@ async def notifications(user: RequireDoctor, svc: NotificationDep) -> list[RowOu
     return await svc.list_for_user(user.id)
 
 
+@router.post("/notifications/{notification_id}/read")
+async def read_notification(notification_id: UUID, user: RequireDoctor, svc: NotificationDep) -> RowOut:
+    return await svc.mark_read(notification_id, user.id)
+
+
 @router.get("/reviews")
 async def reviews(user: RequireDoctor, svc: AppointmentDep) -> list[RowOut]:
     return await svc.list_reviews_for_doctor(user.id)

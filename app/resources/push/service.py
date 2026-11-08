@@ -29,6 +29,9 @@ async def dispatch_notification(
     payload_data = dict(data or {})
     if "type" not in payload_data:
         payload_data["type"] = type
+    # Lets the apps show booking and payment confirmations on the home
+    # screen instead of treating every push as an inbox notification.
+    payload_data["notification_type"] = type
     if "click_action" not in payload_data:
         payload_data["click_action"] = "FLUTTER_NOTIFICATION_CLICK"
 

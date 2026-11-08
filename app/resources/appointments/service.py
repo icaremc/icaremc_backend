@@ -60,18 +60,21 @@ class AppointmentService:
         self._repo.add(ChatConversation(appointment_id=row.id, patient_id=user_id, doctor_id=body.doctor_id))
         await self._repo.flush()
 
-        # Real-time push notification to the doctor about new appointment request
-        p_name = profile.full_name or "A patient"
+        doc_name = f"{doctor.first_name or ''} {doctor.last_name or ''}".strip() or "your doctor"
+        doc_display = doc_name if doc_name.lower().startswith("dr.") else f"Dr. {doc_name}"
         await dispatch_notification(
             db=self._repo.session,
-            user_id=body.doctor_id,
-            title="New Appointment Request",
-            body=f"{p_name} booked for {body.appointment_date} at {body.time_slot}.",
-            type="appointment_new",
+            user_id=user_id,
+            title="Booking received",
+            body=(
+                f"Your appointment with {doc_display} on {body.appointment_date} "
+                f"at {body.time_slot} was submitted."
+            ),
+            type="appointment_booked",
             data={
                 "type": "appointment",
-                "screen": "doctor_appointment_detail",
-                "route": f"/doctor/appointments/{row.id}",
+                "screen": "appointment_detail",
+                "route": f"/appointments/{row.id}",
                 "resource_id": str(row.id),
                 "appointment_id": str(row.id),
             },
